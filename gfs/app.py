@@ -540,11 +540,12 @@ def create_app():
         lines = [t("admins_title", lang, total=len(admins)) + "\n"]
         role_icons = {"superadmin": "👑", "admin": "👮‍♂️"}
         for a in admins:
-            uname = f" (@{a['username']})" if a.get("username") else ""
-            name_str = f" — *{a['name']}*" if a.get("name") else ""
+            uname = f"@{a['username']}" if a.get("username") else f"`{a['id']}`"
+            name_str = f" ({a['name']})" if a.get("name") else ""
             r = a.get("role") or "admin"
             icon = role_icons.get(r, "👤")
-            lines.append(f"• {icon} `{a['id']}`{name_str}{uname} `[{r}]`")
+            id_info = f" — `{a['id']}`" if a.get("username") else ""
+            lines.append(f"• {icon} *{uname}*{id_info}{name_str} `[{r}]`")
         lines.append(t("admins_guide", lang))
 
         rows = []
@@ -556,8 +557,11 @@ def create_app():
 
         if len(admins) > 1:
             del_buttons = []
-            for a in admins[:6]:
-                del_buttons.append(InlineKeyboardButton(text=f"🗑 #{a['id']}", callback_data=f"adm:del_admin_confirm:{a['id']}"))
+            for a in admins:
+                label = f"@{a['username']}" if a.get("username") else (a.get("name") or f"#{a['id']}")
+                if len(label) > 18:
+                    label = label[:16] + "…"
+                del_buttons.append(InlineKeyboardButton(text=f"🗑 {label}", callback_data=f"adm:del_admin_confirm:{a['id']}"))
             for i in range(0, len(del_buttons), 2):
                 rows.append(del_buttons[i:i+2])
 
@@ -1074,18 +1078,25 @@ def create_app():
                 target_id = int(data.split(":")[-1])
                 admins = db.rows("SELECT id FROM admins")
                 if len(admins) <= 1:
-                    await query.answer("Oxirgi administratorni o'chirib bo'lmaydi!", show_alert=True)
+                    await query.answer(t("admin_last_error", lang), show_alert=True)
                     return
+                admin_row = db.rows("SELECT a.id, a.name, u.username FROM admins a LEFT JOIN users u ON u.id=a.id WHERE a.id=?", (target_id,))
+                target_name = f"@{admin_row[0]['username']}" if (admin_row and admin_row[0].get("username")) else f"#{target_id}"
                 await query.answer()
                 confirm_markup = InlineKeyboardMarkup(inline_keyboard=[
                     [
-                        InlineKeyboardButton(text="🗑 Ha, o'chirish", callback_data=f"adm:del_admin_do:{target_id}"),
-                        InlineKeyboardButton(text="❌ Bekor qilish", callback_data="adm:admins"),
+                        InlineKeyboardButton(text=t("btn_confirm_yes", lang), callback_data=f"adm:del_admin_do:{target_id}"),
+                        InlineKeyboardButton(text=t("btn_confirm_no", lang), callback_data="adm:admins"),
                     ]
                 ])
+                confirm_msg = {
+                    "uz": f"⚠️ *Haqiqatan ham {target_name} administratorni o'chirmoqchimisiz?*",
+                    "ru": f"⚠️ *Вы действительно хотите удалить администратора {target_name}?*",
+                    "en": f"⚠️ *Are you sure you want to delete administrator {target_name}?*"
+                }.get(lang, f"⚠️ *Haqiqatan ham {target_name} administratorni o'chirmoqchimisiz?*")
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(
-                        f"⚠️ *Haqiqatan ham #{target_id} administratorni o'chirmoqchimisiz?*",
+                        confirm_msg,
                         reply_markup=confirm_markup,
                         parse_mode="Markdown"
                     )
@@ -1095,10 +1106,12 @@ def create_app():
                 target_id = int(data.split(":")[-1])
                 admins = db.rows("SELECT id FROM admins")
                 if len(admins) <= 1:
-                    await query.answer("Oxirgi administratorni o'chirib bo'lmaydi!", show_alert=True)
+                    await query.answer(t("admin_last_error", lang), show_alert=True)
                     return
+                admin_row = db.rows("SELECT a.id, u.username FROM admins a LEFT JOIN users u ON u.id=a.id WHERE a.id=?", (target_id,))
+                deleted_name = f"@{admin_row[0]['username']}" if (admin_row and admin_row[0].get("username")) else f"#{target_id}"
                 db.execute("DELETE FROM admins WHERE id=?", (target_id,))
-                await query.answer(f"✅ #{target_id} admin o'chirildi", show_alert=True)
+                await query.answer(f"✅ {deleted_name} o'chirildi", show_alert=True)
                 text, markup = build_admins_view(lang=lang)
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")

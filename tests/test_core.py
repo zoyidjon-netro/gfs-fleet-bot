@@ -480,6 +480,19 @@ def test_admin_crud_api_and_bot_actions(tmp_path, monkeypatch):
     assert db.is_admin(666)
     assert any("Administrator muvaffaqiyatli qo'shildi" in c.args[0].text for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage))
 
+    # 13. Verify that admin buttons display usernames
+    q_admins = CallbackQuery(
+        id="cb_adm_list",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_adm",
+        message=msg_box,
+        data="adm:admins"
+    ).as_(bot)
+    bot.reset_mock()
+    asyncio.run(dp.feed_update(bot, Update(update_id=108, callback_query=q_admins)))
+    edit_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert any("🗑 @bekzod" in btn.text for call in edit_calls for row in call.reply_markup.inline_keyboard for btn in row)
+
     db.conn.close()
 
 
