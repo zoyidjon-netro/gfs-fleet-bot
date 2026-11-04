@@ -1,0 +1,20 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      DB_PATH: /app/data/gfs.sqlite3
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+  backup:
+    build: .
+    restart: unless-stopped
+    environment:
+      DB_PATH: /app/data/gfs.sqlite3
+    volumes:
+      - ./data:/app/data
+    command: ["sh", "-c", "while true; do python backup_db.py || true; sleep 86400; done"]
