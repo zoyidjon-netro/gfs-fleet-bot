@@ -232,3 +232,37 @@ def test_existing_database_audit_migration_preserves_reports(tmp_path):
     row = db.rows("SELECT * FROM audits")[0]
     assert row["result"] == "Original report" and row["details"] is None
     db.conn.close()
+
+
+
+def test_admin_inline_callbacks(tmp_path, monkeypatch):
+    from aiogram.types import Update, CallbackQuery, User
+    from aiogram.methods import AnswerCallbackQuery
+    monkeypatch.setenv('DB_PATH', str(tmp_path / 'cb.sqlite'))
+    monkeypatch.setenv('ADMIN_IDS', '7')
+    monkeypatch.setenv('BOT_TOKEN', '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11')
+    app = create_app()
+    dp = app.state.dp
+    db = app.state.db
+
+    db.execute("INSERT INTO jobs(id,owner,payload,due,state) VALUES(101,7,'{}',1,'pending')")
+    bot = AsyncMock()
+
+    # 1. Non-admin clicking admin button
+    q1 = CallbackQuery(id='cb_1', from_user=User(id=999, is_bot=False, first_name='Other'), chat_instance='c1', data='adm:main').as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=1, callback_query=q1)))
+    calls1 = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], AnswerCallbackQuery)]
+    assert any(c.text == "Sizda ruxsat yo'q!" for c in calls1)
+
+    # 2. Admin clicking adm:cancel:101
+    q2 = CallbackQuery(id='cb_2', from_user=User(id=7, is_bot=False, first_name='Admin'), chat_instance='c2', data='adm:cancel:101').as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=2, callback_query=q2)))
+    assert db.rows("SELECT state FROM jobs WHERE id=101")[0]["state"] == "cancelled"
+
+    # 3. Driver clicking regular button
+    q3 = CallbackQuery(id='cb_3', from_user=User(id=888, is_bot=False, first_name='Driver'), chat_instance='c3', data='driver_choice').as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=3, callback_query=q3)))
+    calls3 = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], AnswerCallbackQuery)]
+    assert any(c.text == "Qabul qilindi" for c in calls3)
+
+    db.conn.close()

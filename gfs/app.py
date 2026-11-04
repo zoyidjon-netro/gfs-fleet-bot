@@ -122,6 +122,8 @@ def create_app():
             db.conn.close()
 
     app = FastAPI(title="GFS Speaker", lifespan=lifespan)
+    app.state.dp = dp
+    app.state.db = db
 
     async def auth(authorization: str = Header(default="")):
         try:
@@ -256,9 +258,207 @@ def create_app():
             db.execute("INSERT INTO users VALUES(?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username", (message.from_user.id, (message.from_user.username or "").lower()))
         return message.chat.type == "private" and message.from_user and db.is_admin(message.from_user.id)
 
-    async def text_chunks(message, text):
-        for i in range(0, len(text), 3900):
-            await message.answer(text[i:i + 3900])
+    async def text_chunks(message, text, reply_markup=None):
+        chunks = [text[i:i + 3900] for i in range(0, len(text), 3900)] or [""]
+        for idx, chunk in enumerate(chunks):
+            markup = reply_markup if idx == len(chunks) - 1 else None
+            await message.answer(chunk, reply_markup=markup)
+
+    def build_main_text():
+        return (
+            "🚛 *GFS Fleet & Safety Bot*\n\n"
+            "Botni boshqarish uchun quyidagi menyu tugmalaridan foydalaning:\n\n"
+            "• 📱 *Mini App* — Xabar tarqatmalari va qulay vizual panel\n"
+            "• 🔄 *Sinxronlash* — Monday.com va Telegram guruhlarni yangilash\n"
+            "• 📋 *Guruhlar* — Guruhlarning Unit bog'lanishlari va konfliktlar\n"
+            "• 📊 *COI Auditlari* — So'nggi COI VIN tekshiruvlari tarixi\n"
+            "• ⏰ *Rejalar* — Rejalashtirilgan tarqatmalar ro'yxati\n"
+            "• 👥 *Adminlar* — Administratorlar ro'yxati\n\n"
+            "📄 *COI tekshiruvi:* PDF faylni to'g'ridan-to'g'ri botga yuboring.\n"
+            "📷 *Media file_id:* Rasm, video yoki stikerni yuboring."
+        )
+
+    def build_main_markup():
+        webapp_url = os.getenv("WEBAPP_URL", "")
+        rows = []
+        if webapp_url.startswith("https://"):
+            rows.append([InlineKeyboardButton(text="📱 Mini App (Boshqaruv paneli)", web_app=WebAppInfo(url=webapp_url))])
+        rows.append([
+            InlineKeyboardButton(text="🔄 Sinxronlash", callback_data="adm:sync"),
+            InlineKeyboardButton(text="📋 Guruhlar", callback_data="adm:groups"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="📊 COI Auditlari", callback_data="adm:audits"),
+            InlineKeyboardButton(text="⏰ Rejalar", callback_data="adm:jobs"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="👥 Adminlar", callback_data="adm:admins"),
+            InlineKeyboardButton(text="ℹ️ Yordam", callback_data="adm:help"),
+        ])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    def build_groups_view(conflicts_only=False):
+        groups = db.groups()
+        present_groups = [g for g in groups if g.get("present")]
+        conflicts = [g for g in present_groups if not (g.get("manual_unit") or g.get("unit"))]
+        matched = len(present_groups) - len(conflicts)
+
+        lines = [
+            "📋 *Telegram guruhlar va Unitlar holati:*\n",
+            f"📊 *Jami guruhlar:* {len(groups)} ta (Faol: {len(present_groups)} ta)",
+            f"🔗 *Bog'langan:* {matched} ta | ⚠️ *Konfliktlar:* {len(conflicts)} ta\n",
+        ]
+
+        target_list = conflicts if conflicts_only else present_groups
+        if conflicts_only:
+            lines.append("⚠️ *Faqat konfliktli guruhlar:*\n")
+            if not conflicts:
+                lines.append("🎉 Barcha faol guruhlar muvaffaqiyatli bog'langan!")
+        else:
+            lines.append("👥 *Faol guruhlar ro'yxati:*\n")
+            if not present_groups:
+                lines.append("Bot hozircha hech qaysi faol guruhda yo'q.")
+
+        for g in target_list[:20]:
+            title = g.get("title") or "Nomsiz"
+            unit = g.get("manual_unit") or g.get("unit")
+            if unit:
+                manual = " (qo'lda)" if g.get("manual_unit") else ""
+                lines.append(f"• `{title}` → Unit *{unit}*{manual}")
+            else:
+                lines.append(f"• ⚠️ `{title}` → *KONFLIKT*")
+
+        if len(target_list) > 20:
+            lines.append(f"\n_... va yana {len(target_list) - 20} ta guruh bor._")
+
+        rows = []
+        webapp_url = os.getenv("WEBAPP_URL", "")
+        if webapp_url.startswith("https://"):
+            rows.append([InlineKeyboardButton(text="📱 Mini Appda Unitlarni sozlash", web_app=WebAppInfo(url=webapp_url))])
+
+        toggle_btn = (
+            InlineKeyboardButton(text="📋 Barcha guruhlar", callback_data="adm:groups")
+            if conflicts_only else
+            InlineKeyboardButton(text="⚠️ Faqat konfliktlar", callback_data="adm:groups:conflicts")
+        )
+        rows.append([
+            toggle_btn,
+            InlineKeyboardButton(text="🔄 Sinxronlash", callback_data="adm:sync")
+        ])
+        rows.append([InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")])
+        return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+    def build_audits_view():
+        audits = db.rows("SELECT * FROM audits ORDER BY id DESC LIMIT 5")
+        if not audits:
+            text = (
+                "📊 *COI Auditlari tarixi bo'sh.*\n\n"
+                "Tekshiruv o'tkazish uchun istalgan COI PDF faylini botga yuboring."
+            )
+        else:
+            tz_str = os.getenv("TIMEZONE", "Asia/Tashkent")
+            try:
+                tz = ZoneInfo(tz_str)
+            except Exception:
+                tz = timezone.utc
+            lines = ["📊 *So'nggi COI Auditlari:*\n"]
+            for a in audits:
+                try:
+                    dt = datetime.fromtimestamp(a["created"], tz=timezone.utc).astimezone(tz).strftime("%d.%m.%Y %H:%M")
+                except Exception:
+                    dt = "-"
+                st = a.get("state")
+                icon = "✅" if st == "done" else ("⏳" if st == "processing" else "❌")
+                fname = a.get("filename") or "Nomsiz PDF"
+                lines.append(f"{icon} *Audit #{a['id']}* — `{fname}`\n🕒 {dt} | Holat: `{st}`\n")
+            text = "\n".join(lines)
+
+        rows = []
+        webapp_url = os.getenv("WEBAPP_URL", "")
+        if webapp_url.startswith("https://"):
+            rows.append([InlineKeyboardButton(text="📱 Mini Appda ko'rish", web_app=WebAppInfo(url=webapp_url))])
+        rows.append([
+            InlineKeyboardButton(text="🔄 Yangilash", callback_data="adm:audits"),
+            InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")
+        ])
+        return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+    def build_jobs_view():
+        jobs = db.jobs()
+        active_jobs = [j for j in jobs if j.get("state") in ("pending", "running")]
+        tz_str = os.getenv("TIMEZONE", "Asia/Tashkent")
+        try:
+            tz = ZoneInfo(tz_str)
+        except Exception:
+            tz = timezone.utc
+
+        rows = []
+        if not jobs:
+            text = (
+                "⏰ *Rejalashtirilgan tarqatmalar mavjud emas.*\n\n"
+                "Mini App orqali bir martalik yoki haftalik xabar tarqatmalari rejalashtirishingiz mumkin."
+            )
+        else:
+            lines = [
+                f"⏰ *Tarqatmalar ro'yxati* (Jami: {len(jobs)}, Faol: {len(active_jobs)}):\n"
+            ]
+            for j in jobs[:6]:
+                st = j.get("state")
+                icon = "⏳" if st == "pending" else ("🚀" if st == "running" else ("✅" if st == "done" else "🚫"))
+                try:
+                    dt = datetime.fromtimestamp(j.get("due", 0), tz=timezone.utc).astimezone(tz).strftime("%d.%m.%Y %H:%M")
+                except Exception:
+                    dt = "-"
+                kind = j.get("kind", "text")
+                lines.append(f"{icon} *Vazifa #{j['id']}* — `{kind.upper()}`\n🕒 {dt} | Holat: `{st}`\n")
+            text = "\n".join(lines)
+
+            for aj in active_jobs[:3]:
+                rows.append([InlineKeyboardButton(text=f"❌ #{aj['id']} vazifani bekor qilish", callback_data=f"adm:cancel:{aj['id']}")])
+
+        webapp_url = os.getenv("WEBAPP_URL", "")
+        if webapp_url.startswith("https://"):
+            rows.append([InlineKeyboardButton(text="➕ Yangi tarqatish (Mini App)", web_app=WebAppInfo(url=webapp_url))])
+        rows.append([
+            InlineKeyboardButton(text="🔄 Yangilash", callback_data="adm:jobs"),
+            InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")
+        ])
+        return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+    def build_admins_view():
+        admins = db.rows("SELECT a.id, u.username FROM admins a LEFT JOIN users u ON u.id=a.id ORDER BY a.id")
+        lines = [f"👥 *Administratorlar ro'yxati* (Jami: {len(admins)} ta):\n"]
+        for a in admins:
+            uname = f" (@{a['username']})" if a.get("username") else ""
+            lines.append(f"• ID: `{a['id']}`{uname}")
+        lines.append("\n➕ *Yangi admin qo'shish:*")
+        lines.append("`/add_admin ID` yoki `/add_admin @username`")
+        rows = [
+            [
+                InlineKeyboardButton(text="🔄 Yangilash", callback_data="adm:admins"),
+                InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")
+            ]
+        ]
+        return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+    def build_help_view():
+        text = (
+            "ℹ️ *GFS Fleet & Safety Bot — Qo'llanma*\n\n"
+            "🤖 *Asosiy imkoniyatlar:*\n"
+            "• *COI VIN tekshiruvi:* COI PDF faylini shunchaki botga yuboring yoki reply qilib `/check_coi` bering.\n"
+            "• *Monday.com sinxronlash:* Guruh nomlarini Monday doskasidagi Unitlar bilan avtomatik bog'laydi.\n"
+            "• *Xabar tarqatish (Mini App):* Guruhlarga matn, media, stiker va inline tugmali xabarlarni tarqating.\n"
+            "• *Rejalashtirish:* Bir martalik yoki haftalik avtomatik tarqatmalarni sozlang.\n\n"
+            "📌 *Buyruqlar:*\n"
+            "• `/start` yoki `/help` — Bosh menyuni ochish\n"
+            "• `/sync` — Monday va guruhlarni sinxronlash\n"
+            "• `/groups` — Guruhlar va Unitlar holati\n"
+            "• `/check_coi` — PDF faylga reply qilib audit qilish\n"
+            "• `/add_admin` — Yangi admin qo'shish\n"
+            "• `/source` — Mini App uchun nusxa xabari IDlarini olish"
+        )
+        rows = [[InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]]
+        return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
     @dp.my_chat_member()
     async def membership(event):
@@ -287,10 +487,10 @@ def create_app():
             return
         url = os.getenv("WEBAPP_URL", "")
         if url.startswith("https://"):
-            await bot.set_chat_menu_button(chat_id=message.chat.id, menu_button=MenuButtonWebApp(
-                text="Mini App", web_app=WebAppInfo(url=url)))
-        markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="GFS Speaker", web_app=WebAppInfo(url=url))]]) if url.startswith("https://") else None
-        await message.answer("GFS Speaker\nCOI PDF yuboring yoki /check_coi ni PDFga reply qiling.\n/sync — Monday va guruhlar\n/groups — guruhlar\n/add_admin ID yoki @username\nMedia/stiker yuboring: tarqatma uchun file_id olinadi.\nIstalgan xabarni /source bilan reply qiling: nusxa yuborish manbasi.", reply_markup=markup)
+            with contextlib.suppress(Exception):
+                await bot.set_chat_menu_button(chat_id=message.chat.id, menu_button=MenuButtonWebApp(
+                    text="Mini App", web_app=WebAppInfo(url=url)))
+        await message.answer(build_main_text(), reply_markup=build_main_markup(), parse_mode="Markdown")
 
     @dp.message(Command("add_admin"))
     async def add_admin(message: Message):
@@ -313,7 +513,11 @@ def create_app():
             await message.answer("Musbat Telegram User ID yoki @username kiriting.")
             return
         db.execute("INSERT OR IGNORE INTO admins VALUES(?)", (uid,))
-        await message.answer(f"Administrator qo'shildi: {uid}")
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👥 Adminlar ro'yxati", callback_data="adm:admins")],
+            [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+        ])
+        await message.answer(f"✅ Administrator qo'shildi: `{uid}`", parse_mode="Markdown", reply_markup=markup)
 
     @dp.message(Command("sync", "groups"))
     async def sync_command(message: Message):
@@ -328,7 +532,14 @@ def create_app():
                 if not g["present"]:
                     continue
                 lines.append(f'{g["title"]} → {g["manual_unit"] or g["unit"] or "KONFLIKT"}')
-            await text_chunks(message, "\n".join(lines))
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="📋 Guruhlar", callback_data="adm:groups"),
+                    InlineKeyboardButton(text="🔄 Qayta sinxronlash", callback_data="adm:sync")
+                ],
+                [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+            ])
+            await text_chunks(message, "\n".join(lines), reply_markup=markup)
         except Exception as exc:
             log.exception("Sync command failed")
             await message.answer(f"Sinxronlash xatosi: {exc}")
@@ -353,11 +564,17 @@ def create_app():
             details = audit_details(vins, trucks, db.groups())
             db.execute("UPDATE audits SET state='done',result=?,details=? WHERE id=?",
                        (result,json.dumps(details),audit_id))
-            await text_chunks(message, result)
+            coi_markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Guruhlar holati", callback_data="adm:groups")],
+                [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+            ])
+            await text_chunks(message, result, reply_markup=coi_markup)
         except Exception as exc:
             db.execute("UPDATE audits SET state='failed',error=? WHERE id=?", (str(exc),audit_id))
             log.exception("COI check failed")
-            await message.answer(f"COI tekshiruvi bajarilmadi: {exc}")
+            await message.answer(f"COI tekshiruvi bajarilmadi: {exc}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+            ]))
 
     @dp.message(Command("check_coi"))
     async def coi_command(message: Message):
@@ -374,7 +591,16 @@ def create_app():
         if not await known_user(message):
             return
         if message.reply_to_message:
-            await message.answer(f"Mini App: source_chat={message.chat.id}, source_message={message.reply_to_message.message_id}")
+            webapp_url = os.getenv("WEBAPP_URL", "")
+            rows = []
+            if webapp_url.startswith("https://"):
+                rows.append([InlineKeyboardButton(text="📱 Mini Appda ochish", web_app=WebAppInfo(url=webapp_url))])
+            rows.append([InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")])
+            await message.answer(
+                f"📋 *Manba xabar ma'lumotlari:*\n\n`source_chat`: `{message.chat.id}`\n`source_message`: `{message.reply_to_message.message_id}`\n\n_Mini App 'Nusxa' (copy) rejimida ushbu parametrlarni kiriting._",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+            )
         else:
             await message.answer("Manba xabarga reply qiling: /source")
 
@@ -389,11 +615,134 @@ def create_app():
             if media:
                 file_id = media[-1].file_id if kind == "photo" else media.file_id
                 db.execute("INSERT OR REPLACE INTO media VALUES(?,?,?)", (file_id, message.from_user.id, kind))
-                await message.answer(f"Media turi: {kind}\nfile_id: {file_id}")
+                webapp_url = os.getenv("WEBAPP_URL", "")
+                rows = []
+                if webapp_url.startswith("https://"):
+                    rows.append([InlineKeyboardButton(text="📱 Mini Appda tarqatish", web_app=WebAppInfo(url=webapp_url))])
+                rows.append([InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")])
+                await message.answer(
+                    f"📎 *Media saqlandi!*\n\n• Turi: `{kind}`\n• `file_id`: `{file_id}`\n\n_Bu file_id'dan Mini App orqali tarqatishda foydalanishingiz mumkin._",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+                    parse_mode="Markdown"
+                )
                 break
 
     @dp.callback_query()
     async def callback(query):
+        data = query.data or ""
+        if data.startswith("adm:"):
+            if not query.from_user or not db.is_admin(query.from_user.id):
+                await query.answer("Sizda ruxsat yo'q!", show_alert=True)
+                return
+
+            if data == "adm:main":
+                await query.answer()
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(build_main_text(), reply_markup=build_main_markup(), parse_mode="Markdown")
+                return
+
+            if data == "adm:sync":
+                await query.answer("🔄 Sinxronlanmoqda...", show_alert=False)
+                try:
+                    trucks = await monday.trucks()
+                    failures = await refresh_groups(bot, db)
+                    db.remap(trucks)
+                    groups = db.groups()
+                    present_groups = [g for g in groups if g.get("present")]
+                    conflicts = [g for g in present_groups if not (g.get("manual_unit") or g.get("unit"))]
+                    matched = len(present_groups) - len(conflicts)
+
+                    lines = [
+                        "✅ *Sinxronlash muvaffaqiyatli yakunlandi!*\n",
+                        f"🚛 *Monday yuk mashinalari:* {len(trucks)} ta",
+                        f"👥 *Faol Telegram guruhlar:* {len(present_groups)} ta",
+                        f"🔗 *Bog'langan Unitlar:* {matched} ta",
+                        f"⚠️ *Konfliktli guruhlar:* {len(conflicts)} ta",
+                    ]
+                    if failures:
+                        lines.append(f"❌ *Yangilanmagan chatlar:* {len(failures)} ta")
+
+                    rows = []
+                    webapp_url = os.getenv("WEBAPP_URL", "")
+                    if webapp_url.startswith("https://"):
+                        rows.append([InlineKeyboardButton(text="📱 Mini Appda ko'rish", web_app=WebAppInfo(url=webapp_url))])
+                    rows.append([
+                        InlineKeyboardButton(text="📋 Guruhlar holati", callback_data="adm:groups"),
+                        InlineKeyboardButton(text="⚠️ Faqat konfliktlar", callback_data="adm:groups:conflicts"),
+                    ])
+                    rows.append([
+                        InlineKeyboardButton(text="🔄 Qayta sinxronlash", callback_data="adm:sync"),
+                        InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main"),
+                    ])
+                    with contextlib.suppress(Exception):
+                        await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
+                except Exception as exc:
+                    log.exception("Sync callback failed")
+                    with contextlib.suppress(Exception):
+                        await query.message.edit_text(
+                            f"❌ *Sinxronlash xatosi:*\n`{exc}`",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                                [InlineKeyboardButton(text="🔄 Qayta urinish", callback_data="adm:sync")],
+                                [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+                            ]),
+                            parse_mode="Markdown"
+                        )
+                return
+
+            if data == "adm:groups":
+                await query.answer()
+                text, markup = build_groups_view(conflicts_only=False)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:groups:conflicts":
+                await query.answer()
+                text, markup = build_groups_view(conflicts_only=True)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:audits":
+                await query.answer()
+                text, markup = build_audits_view()
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:jobs":
+                await query.answer()
+                text, markup = build_jobs_view()
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:cancel:"):
+                job_id = int(data.split(":")[-1])
+                cur = db.execute("UPDATE jobs SET state='cancelled' WHERE id=? AND state IN ('pending','running')", (job_id,))
+                if cur.rowcount:
+                    await query.answer(f"✅ #{job_id} vazifa bekor qilindi", show_alert=True)
+                else:
+                    await query.answer("Vazifa topilmadi yoki allaqachon yakunlangan", show_alert=True)
+                text, markup = build_jobs_view()
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:admins":
+                await query.answer()
+                text, markup = build_admins_view()
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:help":
+                await query.answer()
+                text, markup = build_help_view()
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
         # Callback buttons may be used by drivers; no privileged action is attached.
         await query.answer("Qabul qilindi")
 
