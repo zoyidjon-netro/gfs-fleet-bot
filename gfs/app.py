@@ -103,7 +103,7 @@ def create_app():
     db = Database(os.getenv("DB_PATH", "data/gfs.sqlite3"))
     for uid in os.getenv("ADMIN_IDS", "").split(","):
         if uid.strip():
-            db.execute("INSERT OR IGNORE INTO admins VALUES(?)", (int(uid),))
+            db.execute("INSERT OR IGNORE INTO admins(id, role, created_at) VALUES(?, 'superadmin', ?)", (int(uid), time.time()))
     token = os.getenv("BOT_TOKEN", "")
     monday = Monday(os.getenv("MONDAY_TOKEN", ""), os.getenv("MONDAY_BOARD_ID", ""), os.getenv("MONDAY_API_VERSION", "2026-10"))
     dp = Dispatcher()
@@ -164,15 +164,56 @@ def create_app():
 
     @app.get("/api/admins")
     async def admins(uid=Depends(auth)):
-        return db.rows("SELECT a.id,u.username FROM admins a LEFT JOIN users u ON u.id=a.id ORDER BY a.id")
+        return db.rows("SELECT a.id, a.name, a.role, a.created_at, u.username FROM admins a LEFT JOIN users u ON u.id=a.id ORDER BY a.id")
 
     class AdminInput(BaseModel):
         user_id: int = Field(gt=0)
+        name: str | None = None
+        role: str | None = "admin"
+
+    class AdminUpdate(BaseModel):
+        name: str | None = None
+        role: str | None = None
 
     @app.post("/api/admins")
     async def create_admin(data: AdminInput, uid=Depends(auth)):
-        db.execute("INSERT OR IGNORE INTO admins VALUES(?)", (data.user_id,))
-        return {"id": data.user_id}
+        role = (data.role or "admin").strip().lower()
+        if role not in ("superadmin", "admin", "dispatcher"):
+            role = "admin"
+        now = time.time()
+        db.execute(
+            "INSERT INTO admins(id, name, role, created_at) VALUES(?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET name=coalesce(excluded.name, admins.name), role=coalesce(excluded.role, admins.role)",
+            (data.user_id, data.name, role, now)
+        )
+        return {"id": data.user_id, "name": data.name, "role": role, "created_at": now}
+
+    @app.put("/api/admins/{admin_id}")
+    async def update_admin(admin_id: int, data: AdminUpdate, uid=Depends(auth)):
+        existing = db.rows("SELECT id FROM admins WHERE id=?", (admin_id,))
+        if not existing:
+            raise HTTPException(404, "Administrator topilmadi")
+        role = (data.role or "").strip().lower() if data.role else None
+        if role and role not in ("superadmin", "admin", "dispatcher"):
+            role = "admin"
+        if data.name is not None and role is not None:
+            db.execute("UPDATE admins SET name=?, role=? WHERE id=?", (data.name, role, admin_id))
+        elif data.name is not None:
+            db.execute("UPDATE admins SET name=? WHERE id=?", (data.name, admin_id))
+        elif role is not None:
+            db.execute("UPDATE admins SET role=? WHERE id=?", (role, admin_id))
+        return {"id": admin_id, "ok": True}
+
+    @app.delete("/api/admins/{admin_id}")
+    async def delete_admin(admin_id: int, uid=Depends(auth)):
+        admins_list = db.rows("SELECT id FROM admins")
+        if len(admins_list) <= 1:
+            raise HTTPException(400, "Oxirgi administratorni o'chirib bo'lmaydi")
+        existing = db.rows("SELECT id FROM admins WHERE id=?", (admin_id,))
+        if not existing:
+            raise HTTPException(404, "Administrator topilmadi")
+        db.execute("DELETE FROM admins WHERE id=?", (admin_id,))
+        return {"ok": True, "id": admin_id}
 
     @app.get("/api/audits")
     async def audits(uid=Depends(auth)):
@@ -451,19 +492,36 @@ def create_app():
         return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
     def build_admins_view():
-        admins = db.rows("SELECT a.id, u.username FROM admins a LEFT JOIN users u ON u.id=a.id ORDER BY a.id")
+        admins = db.rows("SELECT a.id, a.name, a.role, a.created_at, u.username FROM admins a LEFT JOIN users u ON u.id=a.id ORDER BY a.id")
         lines = [f"👥 *Administratorlar ro'yxati* (Jami: {len(admins)} ta):\n"]
+        role_icons = {"superadmin": "👑", "admin": "👮‍♂️", "dispatcher": "🎧"}
         for a in admins:
             uname = f" (@{a['username']})" if a.get("username") else ""
-            lines.append(f"• ID: `{a['id']}`{uname}")
-        lines.append("\n➕ *Yangi admin qo'shish:*")
-        lines.append("`/add_admin ID` yoki `/add_admin @username`")
-        rows = [
-            [
-                InlineKeyboardButton(text="🔄 Yangilash", callback_data="adm:admins"),
-                InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")
-            ]
-        ]
+            name_str = f" — *{a['name']}*" if a.get("name") else ""
+            r = a.get("role") or "admin"
+            icon = role_icons.get(r, "👤")
+            lines.append(f"• {icon} `{a['id']}`{name_str}{uname} `[{r}]`")
+        lines.append("\n📌 *Buyruqlar orqali boshqarish:*")
+        lines.append("• Qo'shish: `/add_admin ID [ism] [rol]`")
+        lines.append("• O'chirish: `/del_admin ID`")
+        lines.append("• Tahrirlash: `/edit_admin ID Yangi Ism`")
+
+        rows = []
+        webapp_url = os.getenv("WEBAPP_URL", "")
+        if webapp_url.startswith("https://"):
+            rows.append([InlineKeyboardButton(text="📱 Mini Appda boshqarish", web_app=WebAppInfo(url=webapp_url))])
+
+        if len(admins) > 1:
+            del_buttons = []
+            for a in admins[:6]:
+                del_buttons.append(InlineKeyboardButton(text=f"🗑 #{a['id']}", callback_data=f"adm:del_admin_confirm:{a['id']}"))
+            for i in range(0, len(del_buttons), 2):
+                rows.append(del_buttons[i:i+2])
+
+        rows.append([
+            InlineKeyboardButton(text="🔄 Yangilash", callback_data="adm:admins"),
+            InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")
+        ])
         return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
     def build_broadcast_info_view():
@@ -510,7 +568,7 @@ def create_app():
             "• `/sync` — Monday va guruhlarni sinxronlash\n"
             "• `/groups` — Guruhlar va Unitlar holati\n"
             "• `/check_coi` — PDF faylga reply qilib audit qilish\n"
-            "• `/add_admin` — Yangi admin qo'shish\n"
+            "• `/add_admin`, `/del_admin`, `/edit_admin` — Adminlar CRUD boshqaruvi\n"
             "• `/source` — Mini App uchun nusxa xabari IDlarini olish"
         )
         rows = [[InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]]
@@ -552,15 +610,26 @@ def create_app():
     async def add_admin(message: Message):
         if not await known_user(message):
             return
-        arg = (message.text or "").split(maxsplit=1)
-        if len(arg) < 2:
-            await message.answer("/add_admin 123456789 yoki @username")
+        parts = (message.text or "").split(maxsplit=3)
+        if len(parts) < 2:
+            await message.answer(
+                "ℹ️ *Admin qo'shish sintaksisi:*\n"
+                "`/add_admin ID [ism] [rol]` yoki `/add_admin @username [ism] [rol]`\n\n"
+                "Rollar: `admin`, `dispatcher`, `superadmin`\n"
+                "Misol: `/add_admin 123456789 Jasur admin`",
+                parse_mode="Markdown"
+            )
             return
-        value = arg[1].strip()
+        value = parts[1].strip()
+        name = parts[2].strip() if len(parts) > 2 else None
+        role = parts[3].strip().lower() if len(parts) > 3 else "admin"
+        if role not in ("superadmin", "admin", "dispatcher"):
+            role = "admin"
+
         if value.startswith("@"):
             users = db.rows("SELECT id FROM users WHERE username=?", (value[1:].lower(),))
             if len(users) != 1:
-                await message.answer("Username aniqlanmadi. Foydalanuvchi avval /start yuborsin yoki raqamli Telegram User ID kiriting.")
+                await message.answer("Username aniqlanmadi. Foydalanuvchi avval botga /start yuborsin yoki raqamli Telegram User ID kiriting.")
                 return
             uid = users[0]["id"]
         elif value.isdigit() and int(value) > 0:
@@ -568,12 +637,80 @@ def create_app():
         else:
             await message.answer("Musbat Telegram User ID yoki @username kiriting.")
             return
-        db.execute("INSERT OR IGNORE INTO admins VALUES(?)", (uid,))
+
+        db.execute(
+            "INSERT INTO admins(id, name, role, created_at) VALUES(?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET name=coalesce(excluded.name, admins.name), role=coalesce(excluded.role, admins.role)",
+            (uid, name, role, time.time())
+        )
         markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👥 Adminlar ro'yxati", callback_data="adm:admins")],
             [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
         ])
-        await message.answer(f"✅ Administrator qo'shildi: `{uid}`", parse_mode="Markdown", reply_markup=markup)
+        info = f"✅ Administrator qo'shildi: `{uid}`"
+        if name:
+            info += f" ({name})"
+        info += f" | Rol: `{role}`"
+        await message.answer(info, parse_mode="Markdown", reply_markup=markup)
+
+    @dp.message(Command("del_admin", "remove_admin"))
+    async def del_admin(message: Message):
+        if not await known_user(message):
+            return
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) < 2:
+            await message.answer("ℹ️ *Adminni o'chirish:*\n`/del_admin ID` yoki `/del_admin @username`", parse_mode="Markdown")
+            return
+        val = parts[1].strip()
+        if val.startswith("@"):
+            users = db.rows("SELECT id FROM users WHERE username=?", (val[1:].lower(),))
+            if not users:
+                await message.answer("Foydalanuvchi topilmadi.")
+                return
+            target_id = users[0]["id"]
+        elif val.isdigit():
+            target_id = int(val)
+        else:
+            await message.answer("Telegram User ID yoki @username kiriting.")
+            return
+
+        admins = db.rows("SELECT id FROM admins")
+        if len(admins) <= 1:
+            await message.answer("⚠️ Oxirgi administratorni o'chirib bo'lmaydi!")
+            return
+        if not any(a["id"] == target_id for a in admins):
+            await message.answer(f"Administrator `#{target_id}` topilmadi.", parse_mode="Markdown")
+            return
+
+        db.execute("DELETE FROM admins WHERE id=?", (target_id,))
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👥 Adminlar ro'yxati", callback_data="adm:admins")],
+            [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+        ])
+        await message.answer(f"✅ Administrator `#{target_id}` o'chirildi.", parse_mode="Markdown", reply_markup=markup)
+
+    @dp.message(Command("edit_admin"))
+    async def edit_admin(message: Message):
+        if not await known_user(message):
+            return
+        parts = (message.text or "").split(maxsplit=2)
+        if len(parts) < 3:
+            await message.answer("ℹ️ *Adminni tahrirlash:*\n`/edit_admin ID Yangi Ism`", parse_mode="Markdown")
+            return
+        val, new_name = parts[1].strip(), parts[2].strip()
+        if not val.isdigit():
+            await message.answer("Telegram User ID raqam bo'lishi kerak.")
+            return
+        target_id = int(val)
+        if not db.rows("SELECT id FROM admins WHERE id=?", (target_id,)):
+            await message.answer(f"Administrator `#{target_id}` topilmadi.", parse_mode="Markdown")
+            return
+        db.execute("UPDATE admins SET name=? WHERE id=?", (new_name, target_id))
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👥 Adminlar ro'yxati", callback_data="adm:admins")],
+            [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+        ])
+        await message.answer(f"✅ Administrator `#{target_id}` ma'lumotlari yangilandi: *{new_name}*", parse_mode="Markdown", reply_markup=markup)
 
     @dp.message(Command("sync", "groups"))
     async def sync_command(message: Message):
@@ -824,6 +961,40 @@ def create_app():
 
             if data == "adm:admins":
                 await query.answer()
+                text, markup = build_admins_view()
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:del_admin_confirm:"):
+                target_id = int(data.split(":")[-1])
+                admins = db.rows("SELECT id FROM admins")
+                if len(admins) <= 1:
+                    await query.answer("Oxirgi administratorni o'chirib bo'lmaydi!", show_alert=True)
+                    return
+                await query.answer()
+                confirm_markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="🗑 Ha, o'chirish", callback_data=f"adm:del_admin_do:{target_id}"),
+                        InlineKeyboardButton(text="❌ Bekor qilish", callback_data="adm:admins"),
+                    ]
+                ])
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(
+                        f"⚠️ *Haqiqatan ham #{target_id} administratorni o'chirmoqchimisiz?*",
+                        reply_markup=confirm_markup,
+                        parse_mode="Markdown"
+                    )
+                return
+
+            if data.startswith("adm:del_admin_do:"):
+                target_id = int(data.split(":")[-1])
+                admins = db.rows("SELECT id FROM admins")
+                if len(admins) <= 1:
+                    await query.answer("Oxirgi administratorni o'chirib bo'lmaydi!", show_alert=True)
+                    return
+                db.execute("DELETE FROM admins WHERE id=?", (target_id,))
+                await query.answer(f"✅ #{target_id} admin o'chirildi", show_alert=True)
                 text, markup = build_admins_view()
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")

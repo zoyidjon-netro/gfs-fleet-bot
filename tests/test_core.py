@@ -318,3 +318,116 @@ def test_broadcast_command_and_timezone_scheduling(tmp_path, monkeypatch):
     assert db.rows(f"SELECT state FROM jobs WHERE id={job_id}")[0]["state"] in ("running", "done")
 
     db.conn.close()
+
+
+def test_admin_crud_api_and_bot_actions(tmp_path, monkeypatch):
+    from aiogram.types import Update, Message, CallbackQuery, User, Chat
+    from aiogram.methods import AnswerCallbackQuery, SendMessage, EditMessageText
+
+    TOKEN = '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'
+    monkeypatch.setenv('DB_PATH', str(tmp_path / 'admin_crud.sqlite'))
+    monkeypatch.setenv('ADMIN_IDS', '7')
+    monkeypatch.setenv('BOT_TOKEN', TOKEN)
+
+    app = create_app()
+    client = TestClient(app)
+    headers = {'Authorization': 'tma ' + signed_data(token=TOKEN, uid=7)}
+    dp = app.state.dp
+    db = app.state.db
+    bot = AsyncMock()
+
+    # 1. API: Read initial admins
+    admins = client.get('/api/admins', headers=headers).json()
+    assert len(admins) == 1
+    assert admins[0]['id'] == 7
+    assert admins[0]['role'] == 'superadmin'
+
+    # 2. API: Create admin with name and role
+    res = client.post('/api/admins', headers=headers, json={'user_id': 88, 'name': 'Alisher', 'role': 'dispatcher'})
+    assert res.status_code == 200
+    assert res.json()['id'] == 88
+    assert res.json()['role'] == 'dispatcher'
+
+    admins = client.get('/api/admins', headers=headers).json()
+    assert len(admins) == 2
+    admin_88 = next(a for a in admins if a['id'] == 88)
+    assert admin_88['name'] == 'Alisher'
+    assert admin_88['role'] == 'dispatcher'
+
+    # 3. API: Update admin
+    res = client.put('/api/admins/88', headers=headers, json={'name': 'Alisher Yangilandi', 'role': 'admin'})
+    assert res.status_code == 200
+    admin_88_updated = next(a for a in client.get('/api/admins', headers=headers).json() if a['id'] == 88)
+    assert admin_88_updated['name'] == 'Alisher Yangilandi'
+    assert admin_88_updated['role'] == 'admin'
+
+    # 4. API: 404 for updating non-existent admin
+    assert client.put('/api/admins/9999', headers=headers, json={'name': 'Yoq'}).status_code == 404
+
+    # 5. API: Delete admin
+    assert client.delete('/api/admins/88', headers=headers).status_code == 200
+    assert len(client.get('/api/admins', headers=headers).json()) == 1
+
+    # 6. API: 400 when attempting to delete the last admin
+    del_last = client.delete('/api/admins/7', headers=headers)
+    assert del_last.status_code == 400
+    assert "Oxirgi" in del_last.json()['detail']
+
+    # 7. Bot: /add_admin command
+    msg_add = Message(
+        message_id=101,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        text="/add_admin 99 Sardor dispatcher"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=101, message=msg_add)))
+    assert db.is_admin(99)
+    admin_99 = db.rows("SELECT * FROM admins WHERE id=99")[0]
+    assert admin_99["name"] == "Sardor"
+    assert admin_99["role"] == "dispatcher"
+
+    # 8. Bot: /edit_admin command
+    msg_edit = Message(
+        message_id=102,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        text="/edit_admin 99 Sardorbek"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=102, message=msg_edit)))
+    assert db.rows("SELECT name FROM admins WHERE id=99")[0]["name"] == "Sardorbek"
+
+    # 9. Bot: inline callback confirmation and deletion
+    q_confirm = CallbackQuery(
+        id="cb_conf",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_conf",
+        data="adm:del_admin_confirm:99"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=103, callback_query=q_confirm)))
+
+    q_do = CallbackQuery(
+        id="cb_do",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_do",
+        data="adm:del_admin_do:99"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=104, callback_query=q_do)))
+    assert not db.is_admin(99)
+
+    # 10. Bot: /del_admin command safety check on last admin
+    msg_del_last = Message(
+        message_id=105,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        text="/del_admin 7"
+    ).as_(bot)
+    bot.reset_mock()
+    asyncio.run(dp.feed_update(bot, Update(update_id=105, message=msg_del_last)))
+    send_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage)]
+    assert any("Oxirgi administratorni o'chirib bo'lmaydi" in c.text for c in send_calls)
+    assert db.is_admin(7)
+
+    db.conn.close()

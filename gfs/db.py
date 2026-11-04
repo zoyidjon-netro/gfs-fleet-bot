@@ -10,7 +10,7 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript('''
         PRAGMA journal_mode=WAL;
-        CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY, name TEXT, role TEXT DEFAULT 'admin', created_at REAL);
         CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT);
         CREATE TABLE IF NOT EXISTS groups(
           id INTEGER PRIMARY KEY, title TEXT NOT NULL, photo INTEGER NOT NULL,
@@ -28,6 +28,13 @@ class Database:
         ''')
         if "details" not in {row[1] for row in self.conn.execute("PRAGMA table_info(audits)")}:
             self.conn.execute("ALTER TABLE audits ADD COLUMN details TEXT")
+        admin_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(admins)")}
+        if "name" not in admin_cols:
+            self.conn.execute("ALTER TABLE admins ADD COLUMN name TEXT")
+        if "role" not in admin_cols:
+            self.conn.execute("ALTER TABLE admins ADD COLUMN role TEXT DEFAULT 'admin'")
+        if "created_at" not in admin_cols:
+            self.conn.execute("ALTER TABLE admins ADD COLUMN created_at REAL")
         self.conn.commit()
 
     def execute(self, sql, args=()):
