@@ -430,4 +430,54 @@ def test_admin_crud_api_and_bot_actions(tmp_path, monkeypatch):
     assert any("Oxirgi administratorni o'chirib bo'lmaydi" in c.text for c in send_calls)
     assert db.is_admin(7)
 
+    # 11. API: Add admin by username (@username and plain username) & string ID
+    db.execute("INSERT INTO users(id, username) VALUES(?, ?)", (555, "dilshod"))
+    res_uname = client.post('/api/admins', headers=headers, json={'identifier': '@dilshod', 'role': 'dispatcher', 'name': 'Dilshod'})
+    assert res_uname.status_code == 200
+    assert res_uname.json()['id'] == 555
+    assert db.is_admin(555)
+
+    # Plain string ID
+    res_str_id = client.post('/api/admins', headers=headers, json={'identifier': '777', 'role': 'admin'})
+    assert res_str_id.status_code == 200
+    assert res_str_id.json()['id'] == 777
+    assert db.is_admin(777)
+
+    # Unknown username returns 404
+    assert client.post('/api/admins', headers=headers, json={'identifier': '@nonexistent_user'}).status_code == 404
+
+    # 12. Bot: adm:add_admin_prompt callback and reply to prompt
+    msg_box = Message(message_id=50, date=datetime.now(), chat=Chat(id=7, type="private"))
+    q_prompt = CallbackQuery(
+        id="cb_prompt",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_prompt",
+        message=msg_box,
+        data="adm:add_admin_prompt"
+    ).as_(bot)
+    bot.reset_mock()
+    asyncio.run(dp.feed_update(bot, Update(update_id=106, callback_query=q_prompt)))
+    assert any("Yangi administrator qo'shish" in c.args[0].text for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage))
+
+    # User replies to prompt with username
+    db.execute("INSERT INTO users(id, username) VALUES(?, ?)", (666, "bekzod"))
+    prompt_msg = Message(
+        message_id=200,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        text="✍️ Yangi administrator qo'shish:"
+    )
+    reply_msg = Message(
+        message_id=201,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        text="@bekzod Bekzod admin",
+        reply_to_message=prompt_msg
+    ).as_(bot)
+    bot.reset_mock()
+    asyncio.run(dp.feed_update(bot, Update(update_id=107, message=reply_msg)))
+    assert db.is_admin(666)
+    assert any("Administrator muvaffaqiyatli qo'shildi" in c.args[0].text for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage))
+
     db.conn.close()

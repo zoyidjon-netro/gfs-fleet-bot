@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, BufferedInputFile, MenuButtonWebApp
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, BufferedInputFile, MenuButtonWebApp, ForceReply
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Depends
 from fastapi.responses import FileResponse
@@ -167,7 +167,8 @@ def create_app():
         return db.rows("SELECT a.id, a.name, a.role, a.created_at, u.username FROM admins a LEFT JOIN users u ON u.id=a.id ORDER BY a.id")
 
     class AdminInput(BaseModel):
-        user_id: int = Field(gt=0)
+        identifier: str | int | None = None
+        user_id: int | None = None
         name: str | None = None
         role: str | None = "admin"
 
@@ -180,13 +181,40 @@ def create_app():
         role = (data.role or "admin").strip().lower()
         if role not in ("superadmin", "admin", "dispatcher"):
             role = "admin"
+
+        target_id = None
+        if data.user_id and data.user_id > 0:
+            target_id = data.user_id
+        elif data.identifier is not None:
+            raw = str(data.identifier).strip()
+            if raw.isdigit() and int(raw) > 0:
+                target_id = int(raw)
+            else:
+                uname = raw.lstrip("@").lower()
+                users = db.rows("SELECT id FROM users WHERE lower(username)=?", (uname,))
+                if users:
+                    target_id = users[0]["id"]
+                else:
+                    active_bot = bot
+                    if active_bot:
+                        try:
+                            chat = await active_bot.get_chat(f"@{uname}")
+                            target_id = chat.id
+                            db.execute("INSERT INTO users VALUES(?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username", (target_id, uname))
+                        except Exception:
+                            pass
+                if not target_id:
+                    raise HTTPException(404, f"@{uname} foydalanuvchisi topilmadi. Foydalanuvchi avval botga /start yuborgan bo'lishi yoki to'g'ri Telegram ID kiriting.")
+        else:
+            raise HTTPException(422, "Telegram ID yoki @username kiritilishi shart")
+
         now = time.time()
         db.execute(
             "INSERT INTO admins(id, name, role, created_at) VALUES(?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET name=coalesce(excluded.name, admins.name), role=coalesce(excluded.role, admins.role)",
-            (data.user_id, data.name, role, now)
+            (target_id, data.name, role, now)
         )
-        return {"id": data.user_id, "name": data.name, "role": role, "created_at": now}
+        return {"id": target_id, "name": data.name, "role": role, "created_at": now}
 
     @app.put("/api/admins/{admin_id}")
     async def update_admin(admin_id: int, data: AdminUpdate, uid=Depends(auth)):
@@ -510,6 +538,8 @@ def create_app():
         webapp_url = os.getenv("WEBAPP_URL", "")
         if webapp_url.startswith("https://"):
             rows.append([InlineKeyboardButton(text="📱 Mini Appda boshqarish", web_app=WebAppInfo(url=webapp_url))])
+
+        rows.append([InlineKeyboardButton(text="➕ Yangi admin qo'shish", callback_data="adm:add_admin_prompt")])
 
         if len(admins) > 1:
             del_buttons = []
@@ -838,6 +868,52 @@ def create_app():
     async def private_message(message: Message):
         if not await known_user(message):
             return
+
+        if message.reply_to_message and "Yangi administrator qo'shish" in (message.reply_to_message.text or ""):
+            text_val = (message.text or "").strip()
+            parts = text_val.split(maxsplit=2)
+            if not parts:
+                await message.answer("⚠️ ID yoki @username kiritilmadi.")
+                return
+            target_val = parts[0]
+            name = parts[1] if len(parts) > 1 else None
+            role = parts[2].lower() if len(parts) > 2 else "admin"
+            if role not in ("superadmin", "admin", "dispatcher"):
+                role = "admin"
+
+            uid = None
+            if target_val.isdigit() and int(target_val) > 0:
+                uid = int(target_val)
+            else:
+                uname = target_val.lstrip("@").lower()
+                users = db.rows("SELECT id FROM users WHERE lower(username)=?", (uname,))
+                if users:
+                    uid = users[0]["id"]
+                else:
+                    active_bot = bot or message.bot
+                    try:
+                        chat = await active_bot.get_chat(f"@{uname}")
+                        uid = chat.id
+                        db.execute("INSERT INTO users VALUES(?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username", (uid, uname))
+                    except Exception:
+                        await message.answer(f"❌ `@{uname}` foydalanuvchisi topilmadi.\nFoydalanuvchi avval botga /start yuborgan bo'lishi yoki to'g'ri Telegram ID kiriting.", parse_mode="Markdown")
+                        return
+
+            db.execute(
+                "INSERT INTO admins(id, name, role, created_at) VALUES(?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET name=coalesce(excluded.name, admins.name), role=coalesce(excluded.role, admins.role)",
+                (uid, name, role, time.time())
+            )
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👥 Adminlar ro'yxati", callback_data="adm:admins")],
+                [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+            ])
+            info = f"✅ Administrator muvaffaqiyatli qo'shildi: `{uid}`"
+            if name:
+                info += f" ({name})"
+            info += f" | Rol: `{role}`"
+            await message.answer(info, parse_mode="Markdown", reply_markup=markup)
+            return
         if message.document and (message.document.file_name or "").lower().endswith(".pdf"):
             await check_coi(message, message.document)
         for kind in KINDS - {"text", "copy"}:
@@ -964,6 +1040,23 @@ def create_app():
                 text, markup = build_admins_view()
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:add_admin_prompt":
+                await query.answer()
+                prompt_text = (
+                    "✍️ *Yangi administrator qo'shish:*\n\n"
+                    "Foydalanuvchining *Telegram ID* raqamini yoki *@username*ini yuboring:\n"
+                    "• Masalan: `123456789` yoki `@foydalanuvchi`\n"
+                    "• Ism va rol bilan: `123456789 Jasur admin`\n\n"
+                    "_Rollar: `admin`, `dispatcher`, `superadmin`_"
+                )
+                if query.message:
+                    await query.message.answer(prompt_text, parse_mode="Markdown", reply_markup=ForceReply(selective=True))
+                else:
+                    active_bot = bot or query.bot
+                    if active_bot:
+                        await active_bot.send_message(query.from_user.id, prompt_text, parse_mode="Markdown", reply_markup=ForceReply(selective=True))
                 return
 
             if data.startswith("adm:del_admin_confirm:"):
