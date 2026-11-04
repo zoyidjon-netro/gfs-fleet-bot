@@ -4,9 +4,10 @@ import io
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -402,6 +403,8 @@ def create_app():
             raise HTTPException(409, "Faol vazifa topilmadi")
         return {"ok": True}
 
+    adm_state: dict[int, str] = {}
+
     async def known_user(message):
         if message.from_user:
             lang_code = (message.from_user.language_code or "uz")[:2].lower()
@@ -556,6 +559,182 @@ def create_app():
         ])
         return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
+    def parse_custom_time_input(raw: str, tz: ZoneInfo, now_tz: datetime):
+        raw = raw.strip()
+        m = re.match(r"^(\d{1,2}):(\d{2})$", raw)
+        if m:
+            h, mn = int(m.group(1)), int(m.group(2))
+            if 0 <= h < 24 and 0 <= mn < 60:
+                target = now_tz.replace(hour=h, minute=mn, second=0, microsecond=0)
+                if target.timestamp() < time.time() - 60:
+                    target += timedelta(days=1)
+                return target
+
+        m = re.match(r"^(\d{1,2})[./](\d{1,2})\s+(\d{1,2}):(\d{2})$", raw)
+        if m:
+            d, mo, h, mn = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            try:
+                target = datetime(now_tz.year, mo, d, h, mn, tzinfo=tz)
+                if target.timestamp() < time.time() - 60:
+                    target = datetime(now_tz.year + 1, mo, d, h, mn, tzinfo=tz)
+                return target
+            except Exception:
+                pass
+
+        m = re.match(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})\s+(\d{1,2}):(\d{2})$", raw)
+        if m:
+            d, mo, y, h, mn = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))
+            try:
+                return datetime(y, mo, d, h, mn, tzinfo=tz)
+            except Exception:
+                pass
+
+        return None
+
+    def build_job_detail_view(job_id: int, lang: str = "uz"):
+        rows = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if not rows:
+            return "⚠️ Vazifa topilmadi.", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📋 Rejalar ro'yxati", callback_data="adm:jobs")]])
+        job = rows[0]
+        try:
+            payload = json.loads(job["payload"]) if isinstance(job.get("payload"), str) else (job.get("payload") or {})
+        except Exception:
+            payload = {}
+
+        kind = payload.get("kind", "text")
+        text_content = payload.get("text") or ""
+        recipients = payload.get("recipients")
+        job_tz_str = payload.get("timezone", os.getenv("TIMEZONE", "Asia/Tashkent"))
+
+        groups = db.groups()
+        present_groups = [g for g in groups if g.get("present")]
+        active_groups = [g for g in present_groups if (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))]
+        inactive_groups = [g for g in present_groups if g not in active_groups]
+
+        active_count = len(active_groups)
+        inactive_count = len(inactive_groups)
+        total_count = len(present_groups)
+
+        # Recipients mode
+        if recipients is None:
+            recip_mode = "active"
+            recip_label = f"🟢 Faol ({active_count} ta)"
+        elif isinstance(recipients, list) and inactive_groups and set(recipients) == {g["id"] for g in inactive_groups}:
+            recip_mode = "inactive"
+            recip_label = f"⏸ Faol emas ({inactive_count} ta)"
+        elif isinstance(recipients, list) and len(recipients) == total_count:
+            recip_mode = "all"
+            recip_label = f"✨ Hammasi ({total_count} ta)"
+        else:
+            recip_mode = "custom"
+            cnt = len(recipients) if isinstance(recipients, list) else active_count
+            recip_label = f"👥 Tanlangan ({cnt} ta)"
+
+        # Timezone & Scheduled Time
+        try:
+            tz = ZoneInfo(job_tz_str)
+        except Exception:
+            tz = ZoneInfo("Asia/Tashkent")
+            job_tz_str = "Asia/Tashkent"
+
+        dt = datetime.fromtimestamp(job["due"], tz=timezone.utc).astimezone(tz)
+        dt_str = dt.strftime("%d.%m.%Y %H:%M")
+
+        diff = job["due"] - time.time()
+        if diff > 60:
+            h = int(diff // 3600)
+            m = int((diff % 3600) // 60)
+            rel_str = f"({h} soat {m} daqiqadan keyin)" if h > 0 else f"({m} daqiqadan keyin)"
+        elif diff > 0:
+            rel_str = "(1 daqiqadan kam vaqt qoldi)"
+        else:
+            rel_str = "(vaqti o'tib ketgan)"
+
+        tz_names = {
+            "Asia/Tashkent": "🇺🇿 Asia/Tashkent (O'zbekiston, UTC+5)",
+            "America/Chicago": "🇺🇸 America/Chicago (AQSh Markaziy - CT)",
+            "America/New_York": "🇺🇸 America/New_York (AQSh Sharqiy - ET)"
+        }
+        tz_title = tz_names.get(job_tz_str, job_tz_str)
+
+        kind_icons = {
+            "text": "📝 Matn",
+            "photo": "🖼 Rasm",
+            "video": "🎬 Video",
+            "document": "📄 Hujjat",
+            "voice": "🎤 Ovozli",
+            "audio": "🎵 Audio",
+            "copy": "📋 Xabar nusxasi"
+        }
+        k_icon = kind_icons.get(kind, f"📦 {kind.capitalize()}")
+        snippet = (text_content[:120] + "…") if len(text_content) > 120 else (text_content or "_(Biriktirilgan media)_")
+
+        lines = [
+            f"⚙️ *Post #{job_id} — Vaqt va Sozlamalar:*\n",
+            f"• *Turi:* {k_icon}",
+            f"• *Matn:* {snippet}",
+            f"• *Qabul qiluvchilar:* *{recip_label}*",
+            f"• *Vaqt zonasi:* *{tz_title}*",
+            f"• *Yuborish vaqti:* *{dt_str}* _{rel_str}_\n",
+            "🌍 *1. Vaqt zonasini tanlang:*"
+        ]
+
+        kb = []
+        # Row 1: Timezone selection
+        b_uz = "🇺🇿 Toshkent (Asia)" + (" ✓" if job_tz_str == "Asia/Tashkent" else "")
+        b_chi = "🇺🇸 Chicago (CT)" + (" ✓" if job_tz_str == "America/Chicago" else "")
+        b_ny = "🇺🇸 New York (ET)" + (" ✓" if job_tz_str == "America/New_York" else "")
+        kb.append([
+            InlineKeyboardButton(text=b_uz, callback_data=f"adm:job_tz:{job_id}:Asia/Tashkent"),
+            InlineKeyboardButton(text=b_chi, callback_data=f"adm:job_tz:{job_id}:America/Chicago"),
+            InlineKeyboardButton(text=b_ny, callback_data=f"adm:job_tz:{job_id}:America/New_York")
+        ])
+
+        # Row 2: Quick Offset additions
+        kb.append([
+            InlineKeyboardButton(text="⏰ +15 daq", callback_data=f"adm:job_offset:{job_id}:15"),
+            InlineKeyboardButton(text="⏰ +30 daq", callback_data=f"adm:job_offset:{job_id}:30"),
+            InlineKeyboardButton(text="⏰ +1 soat", callback_data=f"adm:job_offset:{job_id}:60"),
+            InlineKeyboardButton(text="⏰ +3 soat", callback_data=f"adm:job_offset:{job_id}:180"),
+        ])
+
+        # Row 3: Presets in the selected timezone
+        kb.append([
+            InlineKeyboardButton(text="☀️ Bugun 18:00", callback_data=f"adm:job_preset:{job_id}:today_18"),
+            InlineKeyboardButton(text="🌙 Bugun 21:00", callback_data=f"adm:job_preset:{job_id}:today_21"),
+            InlineKeyboardButton(text="🌅 Ertaga 09:00", callback_data=f"adm:job_preset:{job_id}:tomorrow_09"),
+        ])
+
+        # Row 4: Adjustment & Manual input
+        kb.append([
+            InlineKeyboardButton(text="➖ 1 soat", callback_data=f"adm:job_offset:{job_id}:-60"),
+            InlineKeyboardButton(text="➕ 1 soat", callback_data=f"adm:job_offset:{job_id}:60"),
+            InlineKeyboardButton(text="✍️ Aniq vaqt yozish", callback_data=f"adm:job_set_time_prompt:{job_id}"),
+        ])
+
+        # Row 5: Recipients toggle
+        b_act = f"🟢 Faol ({active_count})" + (" ✓" if recip_mode == "active" else "")
+        b_inact = f"⏸ Faol emas ({inactive_count})" + (" ✓" if recip_mode == "inactive" else "")
+        b_all = f"✨ Hammasi ({total_count})" + (" ✓" if recip_mode == "all" else "")
+        kb.append([
+            InlineKeyboardButton(text=b_act, callback_data=f"adm:job_recip:{job_id}:active"),
+            InlineKeyboardButton(text=b_inact, callback_data=f"adm:job_recip:{job_id}:inactive"),
+            InlineKeyboardButton(text=b_all, callback_data=f"adm:job_recip:{job_id}:all")
+        ])
+
+        # Row 6: Actions
+        kb.append([
+            InlineKeyboardButton(text="🚀 Hoziroq yuborish", callback_data=f"adm:send_now:{job_id}"),
+            InlineKeyboardButton(text="🗑 Bekor qilish", callback_data=f"adm:cancel_detail:{job_id}")
+        ])
+
+        # Row 7: Back
+        kb.append([
+            InlineKeyboardButton(text="📋 Barcha postlar ro'yxatiga qaytish", callback_data="adm:jobs")
+        ])
+
+        return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=kb)
+
     def build_jobs_view(lang="uz"):
         jobs = db.jobs()
         active_jobs = [j for j in jobs if j.get("state") in ("pending", "running")]
@@ -566,25 +745,47 @@ def create_app():
             tz = timezone.utc
 
         rows = []
-        if not jobs:
-            text = t("jobs_empty", lang)
-        else:
-            lines = [
-                t("jobs_title", lang) + f" ({len(jobs)}):\n"
-            ]
-            for j in jobs[:6]:
-                st = j.get("state")
-                icon = "⏳" if st == "pending" else ("🚀" if st == "running" else ("✅" if st == "done" else "🚫"))
-                try:
-                    dt = datetime.fromtimestamp(j.get("due", 0), tz=timezone.utc).astimezone(tz).strftime("%d.%m.%Y %H:%M")
-                except Exception:
-                    dt = "-"
-                kind = j.get("kind", "text")
-                lines.append(f"{icon} *Vazifa #{j['id']}* — `{kind.upper()}`\n🕒 {dt} | Holat: `{st}`\n")
-            text = "\n".join(lines)
+        # Main action button to add a new post directly in chat!
+        rows.append([InlineKeyboardButton(text="➕ Yangi post qo'shish", callback_data="adm:add_job_prompt")])
 
-            for aj in active_jobs[:3]:
-                rows.append([InlineKeyboardButton(text=t("btn_cancel_job", lang, id=aj['id']), callback_data=f"adm:cancel:{aj['id']}")])
+        lines = [
+            t("jobs_title", lang) + f" ({len(jobs)}):\n"
+        ]
+
+        if not jobs:
+            lines.append("Hozircha postlar mavjud emas.\nYangi post qo'shish uchun *[➕ Yangi post qo'shish]* tugmasini bosing.")
+        else:
+            if active_jobs:
+                lines.append("⏳ *Rejadagi faol postlar (sozlash uchun bosing):*")
+                for aj in active_jobs[:6]:
+                    payload = aj.get("payload", {})
+                    txt = payload.get("text", "") or aj.get("kind", "Xabar")
+                    snippet = (txt[:18] + "…") if len(txt) > 18 else (txt or "Media")
+                    job_tz_str = payload.get("timezone", tz_str)
+                    try:
+                        jtz = ZoneInfo(job_tz_str)
+                        dt = datetime.fromtimestamp(aj.get("due", 0), tz=timezone.utc).astimezone(jtz).strftime("%d.%m %H:%M")
+                    except Exception:
+                        dt = "-"
+                    lines.append(f"• ⏳ *#{aj['id']}* — `{snippet}` (🕒 {dt})")
+                    btn_text = f"⚙️ #{aj['id']}: {snippet} ({dt})"
+                    rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"adm:job_detail:{aj['id']}")])
+                lines.append("")
+
+            other_jobs = [j for j in jobs if j.get("state") not in ("pending", "running")]
+            if other_jobs:
+                lines.append("📋 *Tarix / Bajarilgan postlar:*")
+                for oj in other_jobs[:4]:
+                    st = oj.get("state")
+                    icon = "✅" if st == "done" else "🚫"
+                    try:
+                        dt = datetime.fromtimestamp(oj.get("due", 0), tz=timezone.utc).astimezone(tz).strftime("%d.%m.%Y %H:%M")
+                    except Exception:
+                        dt = "-"
+                    kind = oj.get("kind", "text")
+                    lines.append(f"{icon} *#{oj['id']}* — `{kind.upper()}` | 🕒 {dt} ({st})")
+
+        text = "\n".join(lines)
 
         webapp_url = os.getenv("WEBAPP_URL", "")
         if webapp_url.startswith("https://"):
@@ -1155,9 +1356,55 @@ def create_app():
             await check_coi(message, message.document)
             return
 
-        # Any message from admin in private chat automatically triggers quick broadcast panel!
+        lang = db.get_lang(message.from_user.id) if message.from_user else "uz"
+        st = adm_state.get(message.from_user.id, "")
+
+        # A. Custom time entry
+        if st.startswith("awaiting_custom_time:"):
+            target_job_id = int(st.split(":")[1])
+            adm_state.pop(message.from_user.id, None)
+            raw_time = (message.text or "").strip()
+            row = db.rows("SELECT * FROM jobs WHERE id=?", (target_job_id,))
+            if row:
+                payload = json.loads(row[0]["payload"]) if isinstance(row[0]["payload"], str) else (row[0]["payload"] or {})
+                tz_str = payload.get("timezone", os.getenv("TIMEZONE", "Asia/Tashkent"))
+                try:
+                    tz = ZoneInfo(tz_str)
+                except Exception:
+                    tz = timezone.utc
+                now_tz = datetime.now(tz)
+                target_dt = parse_custom_time_input(raw_time, tz, now_tz)
+                if target_dt:
+                    new_due = target_dt.timestamp()
+                    db.execute("UPDATE jobs SET due=? WHERE id=?", (new_due, target_job_id))
+                    dt_str = target_dt.strftime("%d.%m.%Y %H:%M")
+                    await message.answer(f"✅ Post #{target_job_id} vaqti belgilandi: *{dt_str}* ({tz_str})", parse_mode="Markdown")
+                    text, markup = build_job_detail_view(target_job_id, lang)
+                    await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+                    return
+                else:
+                    await message.answer("⚠️ Vaqt formati noto'g'ri. Iltimos, `18:30` yoki `05.11 09:00` ko'rinishida yozing.")
+                    return
+
+        # B. User explicitly requested to drop a scheduled post via [➕ Yangi post qo'shish]
+        is_scheduled_prompt = (st == "awaiting_scheduled_post") or (message.reply_to_message and "Rejali tarqatish uchun yangi postni tashlang" in (message.reply_to_message.text or ""))
+        if is_scheduled_prompt:
+            adm_state.pop(message.from_user.id, None)
+            job_id = await create_job_from_message(message, message.from_user.id)
+            # Default scheduled for 1 hour from now
+            db.execute("UPDATE jobs SET due=? WHERE id=?", (time.time() + 3600, job_id))
+            text, markup = build_jobs_view(lang=lang)
+            await message.answer(
+                f"✅ *Yangi post #{job_id} qabul qilindi!*\n\n"
+                "Quyidagi ro'yxatdan post ustini bosing va yuborish vaqtini hamda vaqt zonasini tugmalar orqali sozlang:",
+                parse_mode="Markdown"
+            )
+            await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+            return
+
+        # C. Any other spontaneous message from admin in private chat
         job_id = await create_job_from_message(message, message.from_user.id)
-        text, markup = build_quick_broadcast_panel(job_id)
+        text, markup = build_quick_broadcast_panel(job_id, lang=lang)
         await message.reply(text, reply_markup=markup, parse_mode="Markdown")
 
     @dp.callback_query()
@@ -1423,6 +1670,143 @@ def create_app():
                 db.execute("UPDATE jobs SET due=? WHERE id=?", (due, job_id))
                 await query.answer()
                 text, markup = build_quick_broadcast_panel(job_id, lang)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:add_job_prompt":
+                await query.answer()
+                adm_state[query.from_user.id] = "awaiting_scheduled_post"
+                prompt_text = (
+                    "✍️ *Rejali tarqatish uchun yangi postni tashlang:*\n\n"
+                    "• Xabar matnini yozing\n"
+                    "• Rasm, video, hujjat yoki audio yuboring\n"
+                    "• Boshqa kanaldan tayyor postni forward qiling\n\n"
+                    "_Post qabul qilingach, postlar ro'yxatida chiqadi va vaqtini tugmalar orqali sozlashingiz mumkin._"
+                )
+                if query.message:
+                    await query.message.answer(prompt_text, parse_mode="Markdown", reply_markup=ForceReply(selective=True))
+                return
+
+            if data.startswith("adm:job_detail:"):
+                job_id = int(data.split(":")[-1])
+                await query.answer()
+                text, markup = build_job_detail_view(job_id, lang)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:job_tz:"):
+                parts = data.split(":")
+                job_id = int(parts[2])
+                new_tz = parts[3]
+                rows = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))
+                if rows:
+                    payload = json.loads(rows[0]["payload"]) if isinstance(rows[0]["payload"], str) else (rows[0]["payload"] or {})
+                    payload["timezone"] = new_tz
+                    db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(payload), job_id))
+                    await query.answer(f"Vaqt zonasi: {new_tz}")
+                    text, markup = build_job_detail_view(job_id, lang)
+                    with contextlib.suppress(Exception):
+                        await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:job_offset:"):
+                parts = data.split(":")
+                job_id = int(parts[2])
+                offset_mins = int(parts[3])
+                rows = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))
+                if rows:
+                    cur_due = rows[0]["due"]
+                    now = time.time()
+                    base = max(cur_due, now)
+                    new_due = base + offset_mins * 60
+                    if new_due < now + 60:
+                        new_due = now + 60
+                    db.execute("UPDATE jobs SET due=? WHERE id=?", (new_due, job_id))
+                    await query.answer("Vaqt yangilandi")
+                    text, markup = build_job_detail_view(job_id, lang)
+                    with contextlib.suppress(Exception):
+                        await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:job_preset:"):
+                parts = data.split(":")
+                job_id = int(parts[2])
+                preset = parts[3]
+                rows = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))
+                if rows:
+                    payload = json.loads(rows[0]["payload"]) if isinstance(rows[0]["payload"], str) else (rows[0]["payload"] or {})
+                    tz_str = payload.get("timezone", os.getenv("TIMEZONE", "Asia/Tashkent"))
+                    try:
+                        tz = ZoneInfo(tz_str)
+                    except Exception:
+                        tz = timezone.utc
+                    now_tz = datetime.now(tz)
+                    if preset == "today_18":
+                        target = now_tz.replace(hour=18, minute=0, second=0, microsecond=0)
+                        if target.timestamp() < time.time():
+                            target += timedelta(days=1)
+                    elif preset == "today_21":
+                        target = now_tz.replace(hour=21, minute=0, second=0, microsecond=0)
+                        if target.timestamp() < time.time():
+                            target += timedelta(days=1)
+                    elif preset == "tomorrow_09":
+                        target = (now_tz + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+                    else:
+                        target = now_tz + timedelta(hours=1)
+                    new_due = target.timestamp()
+                    db.execute("UPDATE jobs SET due=? WHERE id=?", (new_due, job_id))
+                    await query.answer("Vaqt yangilandi")
+                    text, markup = build_job_detail_view(job_id, lang)
+                    with contextlib.suppress(Exception):
+                        await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:job_recip:"):
+                parts = data.split(":")
+                job_id = int(parts[2])
+                mode = parts[3]
+                rows = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))
+                if rows:
+                    payload = json.loads(rows[0]["payload"]) if isinstance(rows[0]["payload"], str) else (rows[0]["payload"] or {})
+                    groups = db.groups()
+                    present_groups = [g for g in groups if g.get("present")]
+                    active_groups = [g for g in present_groups if (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))]
+                    inactive_groups = [g for g in present_groups if g not in active_groups]
+                    if mode == "active":
+                        payload["recipients"] = None
+                    elif mode == "inactive":
+                        payload["recipients"] = [g["id"] for g in inactive_groups]
+                    elif mode == "all":
+                        payload["recipients"] = [g["id"] for g in present_groups]
+                    db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(payload), job_id))
+                    await query.answer("Guruhlar yangilandi")
+                    text, markup = build_job_detail_view(job_id, lang)
+                    with contextlib.suppress(Exception):
+                        await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:job_set_time_prompt:"):
+                job_id = int(data.split(":")[-1])
+                await query.answer()
+                adm_state[query.from_user.id] = f"awaiting_custom_time:{job_id}"
+                await query.message.answer(
+                    f"✍️ *Post #{job_id} uchun aniq vaqtni kiriting:*\n\n"
+                    "Misollar:\n"
+                    "• Bugun uchun soat: `18:30` yoki `21:45`\n"
+                    "• Aniq sana bilan: `05.11 09:00` yoki `05.11.2026 15:30`\n\n"
+                    "_Vaqt postda tanlangan vaqt zonasi bo'yicha hisoblanadi._",
+                    parse_mode="Markdown",
+                    reply_markup=ForceReply(selective=True)
+                )
+                return
+
+            if data.startswith("adm:cancel_detail:"):
+                job_id = int(data.split(":")[-1])
+                db.execute("UPDATE jobs SET state='cancelled' WHERE id=?", (job_id,))
+                await query.answer("Vazifa bekor qilindi", show_alert=True)
+                text, markup = build_jobs_view(lang=lang)
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
                 return

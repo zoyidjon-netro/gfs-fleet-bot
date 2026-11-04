@@ -853,3 +853,148 @@ def test_quick_broadcast_panel_and_instant_dispatch(tmp_path, monkeypatch):
     assert sent_job["state"] in ("running", "done")
 
     db.conn.close()
+
+
+def test_scheduled_post_creation_list_and_timezone_button_configuration(tmp_path, monkeypatch):
+    import json
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    from aiogram.types import Update, CallbackQuery, User, Message, Chat
+    from aiogram.methods import SendMessage, EditMessageText
+    from gfs.app import create_app
+
+    db_file = tmp_path / "test_sched_flow.sqlite3"
+    monkeypatch.setenv("DB_PATH", str(db_file))
+    monkeypatch.setenv("ADMIN_IDS", "7")
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    app = create_app()
+    db = app.state.db
+    dp = app.state.dp
+
+    # Insert groups
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-1, 'Active Group', 1, 1, 'active')")
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-2, 'Inactive Group', 0, 1, 'inactive')")
+
+    bot = AsyncMock()
+    msg_box = Message(message_id=600, date=datetime.now(), chat=Chat(id=7, type="private"))
+
+    # 1. Admin clicks [➕ Yangi post qo'shish] in Rejalar
+    q_add = CallbackQuery(
+        id="cb_add_post",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_sched",
+        message=msg_box,
+        data="adm:add_job_prompt"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=601, callback_query=q_add)))
+
+    send_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage)]
+    assert any("Rejali tarqatish uchun yangi postni tashlang" in c.text for c in send_calls)
+
+    # 2. Admin drops/sends the post
+    bot.reset_mock()
+    dropped_post = Message(
+        message_id=602,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        text="Ertaga ertalab barcha mashinalar tozalansin!"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=602, message=dropped_post)))
+
+    # Verify job is created in DB
+    jobs = db.rows("SELECT * FROM jobs ORDER BY id DESC")
+    assert jobs
+    new_job = jobs[0]
+    job_id = new_job["id"]
+
+    # Verify bot sent the postlar ro'yxati (List of posts) with clickable button for the post!
+    send_calls2 = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage)]
+    assert any("Yangi post" in c.text for c in send_calls2)
+    last_msg = send_calls2[-1]
+    all_callbacks = [btn.callback_data for row in last_msg.reply_markup.inline_keyboard for btn in row]
+    assert f"adm:job_detail:{job_id}" in all_callbacks
+
+    # 3. User clicks on the post button [⚙️ #ID: ...]
+    bot.reset_mock()
+    q_click_post = CallbackQuery(
+        id="cb_open_detail",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_detail",
+        message=msg_box,
+        data=f"adm:job_detail:{job_id}"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=603, callback_query=q_click_post)))
+
+    edit_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert edit_calls
+    detail_markup = edit_calls[-1].reply_markup
+    detail_cbs = [btn.callback_data for row in detail_markup.inline_keyboard for btn in row]
+
+    # Verify timezone buttons exist
+    assert f"adm:job_tz:{job_id}:Asia/Tashkent" in detail_cbs
+    assert f"adm:job_tz:{job_id}:America/Chicago" in detail_cbs
+    assert f"adm:job_tz:{job_id}:America/New_York" in detail_cbs
+
+    # Verify time adjustment buttons exist
+    assert f"adm:job_offset:{job_id}:15" in detail_cbs
+    assert f"adm:job_preset:{job_id}:tomorrow_09" in detail_cbs
+
+    # 4. User sets timezone to America/Chicago via button
+    bot.reset_mock()
+    q_set_tz = CallbackQuery(
+        id="cb_tz",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_tz",
+        message=msg_box,
+        data=f"adm:job_tz:{job_id}:America/Chicago"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=604, callback_query=q_set_tz)))
+
+    job_row = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))[0]
+    payload = json.loads(job_row["payload"])
+    assert payload["timezone"] == "America/Chicago"
+
+    # 5. User sets preset time tomorrow 09:00 via button
+    bot.reset_mock()
+    q_preset = CallbackQuery(
+        id="cb_preset",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_pre",
+        message=msg_box,
+        data=f"adm:job_preset:{job_id}:tomorrow_09"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=605, callback_query=q_preset)))
+
+    job_row2 = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))[0]
+    due_dt = datetime.fromtimestamp(job_row2["due"], tz=timezone.utc).astimezone(ZoneInfo("America/Chicago"))
+    assert due_dt.hour == 9
+    assert due_dt.minute == 0
+
+    # 6. User enters custom time 19:30
+    bot.reset_mock()
+    q_custom_prompt = CallbackQuery(
+        id="cb_custom_prompt",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_cprompt",
+        message=msg_box,
+        data=f"adm:job_set_time_prompt:{job_id}"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=606, callback_query=q_custom_prompt)))
+
+    custom_time_msg = Message(
+        message_id=607,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        text="19:30"
+    ).as_(bot)
+    bot.reset_mock()
+    asyncio.run(dp.feed_update(bot, Update(update_id=607, message=custom_time_msg)))
+
+    job_row3 = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))[0]
+    due_dt3 = datetime.fromtimestamp(job_row3["due"], tz=timezone.utc).astimezone(ZoneInfo("America/Chicago"))
+    assert due_dt3.hour == 19
+    assert due_dt3.minute == 30
+
+    db.conn.close()
