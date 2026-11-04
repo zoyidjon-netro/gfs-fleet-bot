@@ -192,7 +192,7 @@ def create_app():
     @app.post("/api/admins")
     async def create_admin(data: AdminInput, uid=Depends(auth)):
         role = (data.role or "admin").strip().lower()
-        if role not in ("superadmin", "admin", "dispatcher"):
+        if role not in ("superadmin", "admin"):
             role = "admin"
 
         target_id = None
@@ -235,7 +235,7 @@ def create_app():
         if not existing:
             raise HTTPException(404, "Administrator topilmadi")
         role = (data.role or "").strip().lower() if data.role else None
-        if role and role not in ("superadmin", "admin", "dispatcher"):
+        if role and role not in ("superadmin", "admin"):
             role = "admin"
         if data.name is not None and role is not None:
             db.execute("UPDATE admins SET name=?, role=? WHERE id=?", (data.name, role, admin_id))
@@ -538,7 +538,7 @@ def create_app():
     def build_admins_view(lang="uz"):
         admins = db.rows("SELECT a.id, a.name, a.role, a.created_at, u.username FROM admins a LEFT JOIN users u ON u.id=a.id ORDER BY a.id")
         lines = [t("admins_title", lang, total=len(admins)) + "\n"]
-        role_icons = {"superadmin": "👑", "admin": "👮‍♂️", "dispatcher": "🎧"}
+        role_icons = {"superadmin": "👑", "admin": "👮‍♂️"}
         for a in admins:
             uname = f" (@{a['username']})" if a.get("username") else ""
             name_str = f" — *{a['name']}*" if a.get("name") else ""
@@ -645,7 +645,7 @@ def create_app():
             await message.answer(
                 "ℹ️ *Admin qo'shish sintaksisi:*\n"
                 "`/add_admin ID [ism] [rol]` yoki `/add_admin @username [ism] [rol]`\n\n"
-                "Rollar: `admin`, `dispatcher`, `superadmin`\n"
+                "Rollar: `admin`, `superadmin`\n"
                 "Misol: `/add_admin 123456789 Jasur admin`",
                 parse_mode="Markdown"
             )
@@ -653,7 +653,7 @@ def create_app():
         value = parts[1].strip()
         name = parts[2].strip() if len(parts) > 2 else None
         role = parts[3].strip().lower() if len(parts) > 3 else "admin"
-        if role not in ("superadmin", "admin", "dispatcher"):
+        if role not in ("superadmin", "admin"):
             role = "admin"
 
         if value.startswith("@"):
@@ -878,7 +878,7 @@ def create_app():
             target_val = parts[0]
             name = parts[1] if len(parts) > 1 else None
             role = parts[2].lower() if len(parts) > 2 else "admin"
-            if role not in ("superadmin", "admin", "dispatcher"):
+            if role not in ("superadmin", "admin"):
                 role = "admin"
 
             uid = None

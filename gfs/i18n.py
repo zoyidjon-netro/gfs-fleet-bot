@@ -65,7 +65,7 @@ TRANSLATIONS = {
         # Admins view & CRUD
         "admins_title": "👥 *Administratorlar ro'yxati* (Jami: {total} ta):",
         "admins_guide": "\n📌 *Buyruqlar orqali boshqarish:*\n• Qo'shish: `/add_admin ID yoki @username [ism] [rol]`\n• O'chirish: `/del_admin ID yoki @username`\n• Tahrirlash: `/edit_admin ID Yangi Ism`",
-        "admin_add_prompt_title": "✍️ *Yangi administrator qo'shish:*\n\nFoydalanuvchining *Telegram ID* raqamini yoki *@username*ini yuboring:\n• Masalan: `123456789` yoki `@foydalanuvchi`\n• Ism va rol bilan: `123456789 Jasur admin`\n\n_Rollar: `admin`, `dispatcher`, `superadmin`_",
+        "admin_add_prompt_title": "✍️ *Yangi administrator qo'shish:*\n\nFoydalanuvchining *Telegram ID* raqamini yoki *@username*ini yuboring:\n• Masalan: `123456789` yoki `@foydalanuvchi`\n• Ism va rol bilan: `123456789 Jasur admin`\n\n_Rollar: `admin`, `superadmin`_",
         "admin_del_confirm": "⚠️ *Haqiqatan ham #{id} administratorni o'chirmoqchimisiz?*",
         "admin_deleted": "✅ #{id} admin o'chirildi",
         "admin_last_error": "Oxirgi administratorni o'chirib bo'lmaydi!",
@@ -152,7 +152,7 @@ TRANSLATIONS = {
         # Admins view & CRUD
         "admins_title": "👥 *Список администраторов* (Всего: {total}):",
         "admins_guide": "\n📌 *Управление командами:*\n• Добавить: `/add_admin ID или @username [имя] [роль]`\n• Удалить: `/del_admin ID или @username`\n• Изменить имя: `/edit_admin ID Новое Имя`",
-        "admin_add_prompt_title": "✍️ *Добавление администратора:*\n\nОтправьте *Telegram ID* или *@username* пользователя:\n• Например: `123456789` или `@username`\n• С именем и ролью: `123456789 Иван admin`\n\n_Роли: `admin`, `dispatcher`, `superadmin`_",
+        "admin_add_prompt_title": "✍️ *Добавление администратора:*\n\nОтправьте *Telegram ID* или *@username* пользователя:\n• Например: `123456789` или `@username`\n• С именем и ролью: `123456789 Иван admin`\n\n_Роли: `admin`, `superadmin`_",
         "admin_del_confirm": "⚠️ *Вы действительно хотите удалить администратора #{id}?*",
         "admin_deleted": "✅ Администратор #{id} удален",
         "admin_last_error": "Нельзя удалить последнего администратора!",
@@ -239,7 +239,7 @@ TRANSLATIONS = {
         # Admins view & CRUD
         "admins_title": "👥 *Administrators List* (Total: {total}):",
         "admins_guide": "\n📌 *Command Management:*\n• Add: `/add_admin ID or @username [name] [role]`\n• Delete: `/del_admin ID or @username`\n• Edit: `/edit_admin ID New Name`",
-        "admin_add_prompt_title": "✍️ *Add New Administrator:*\n\nSend the user's *Telegram ID* or *@username*:\n• Example: `123456789` or `@username`\n• With name and role: `123456789 John admin`\n\n_Roles: `admin`, `dispatcher`, `superadmin`_",
+        "admin_add_prompt_title": "✍️ *Add New Administrator:*\n\nSend the user's *Telegram ID* or *@username*:\n• Example: `123456789` or `@username`\n• With name and role: `123456789 John admin`\n\n_Roles: `admin`, `superadmin`_",
         "admin_del_confirm": "⚠️ *Are you sure you want to delete administrator #{id}?*",
         "admin_deleted": "✅ Administrator #{id} deleted",
         "admin_last_error": "Cannot delete the last administrator!",

@@ -343,23 +343,23 @@ def test_admin_crud_api_and_bot_actions(tmp_path, monkeypatch):
     assert admins[0]['role'] == 'superadmin'
 
     # 2. API: Create admin with name and role
-    res = client.post('/api/admins', headers=headers, json={'user_id': 88, 'name': 'Alisher', 'role': 'dispatcher'})
+    res = client.post('/api/admins', headers=headers, json={'user_id': 88, 'name': 'Alisher', 'role': 'admin'})
     assert res.status_code == 200
     assert res.json()['id'] == 88
-    assert res.json()['role'] == 'dispatcher'
+    assert res.json()['role'] == 'admin'
 
     admins = client.get('/api/admins', headers=headers).json()
     assert len(admins) == 2
     admin_88 = next(a for a in admins if a['id'] == 88)
     assert admin_88['name'] == 'Alisher'
-    assert admin_88['role'] == 'dispatcher'
+    assert admin_88['role'] == 'admin'
 
     # 3. API: Update admin
-    res = client.put('/api/admins/88', headers=headers, json={'name': 'Alisher Yangilandi', 'role': 'admin'})
+    res = client.put('/api/admins/88', headers=headers, json={'name': 'Alisher Yangilandi', 'role': 'superadmin'})
     assert res.status_code == 200
     admin_88_updated = next(a for a in client.get('/api/admins', headers=headers).json() if a['id'] == 88)
     assert admin_88_updated['name'] == 'Alisher Yangilandi'
-    assert admin_88_updated['role'] == 'admin'
+    assert admin_88_updated['role'] == 'superadmin'
 
     # 4. API: 404 for updating non-existent admin
     assert client.put('/api/admins/9999', headers=headers, json={'name': 'Yoq'}).status_code == 404
@@ -379,13 +379,13 @@ def test_admin_crud_api_and_bot_actions(tmp_path, monkeypatch):
         date=datetime.now(),
         chat=Chat(id=7, type="private"),
         from_user=User(id=7, is_bot=False, first_name="Admin"),
-        text="/add_admin 99 Sardor dispatcher"
+        text="/add_admin 99 Sardor admin"
     ).as_(bot)
     asyncio.run(dp.feed_update(bot, Update(update_id=101, message=msg_add)))
     assert db.is_admin(99)
     admin_99 = db.rows("SELECT * FROM admins WHERE id=99")[0]
     assert admin_99["name"] == "Sardor"
-    assert admin_99["role"] == "dispatcher"
+    assert admin_99["role"] == "admin"
 
     # 8. Bot: /edit_admin command
     msg_edit = Message(
@@ -432,7 +432,7 @@ def test_admin_crud_api_and_bot_actions(tmp_path, monkeypatch):
 
     # 11. API: Add admin by username (@username and plain username) & string ID
     db.execute("INSERT INTO users(id, username) VALUES(?, ?)", (555, "dilshod"))
-    res_uname = client.post('/api/admins', headers=headers, json={'identifier': '@dilshod', 'role': 'dispatcher', 'name': 'Dilshod'})
+    res_uname = client.post('/api/admins', headers=headers, json={'identifier': '@dilshod', 'role': 'superadmin', 'name': 'Dilshod'})
     assert res_uname.status_code == 200
     assert res_uname.json()['id'] == 555
     assert db.is_admin(555)

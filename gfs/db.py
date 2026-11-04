@@ -38,6 +38,7 @@ class Database:
         user_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         if "lang" not in user_cols:
             self.conn.execute("ALTER TABLE users ADD COLUMN lang TEXT DEFAULT 'uz'")
+        self.conn.execute("UPDATE admins SET role='admin' WHERE role='dispatcher'")
         self.conn.commit()
 
     def execute(self, sql, args=()):
