@@ -11,7 +11,7 @@ class Database:
         self.conn.executescript('''
         PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY, name TEXT, role TEXT DEFAULT 'admin', created_at REAL);
-        CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT);
+        CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT, lang TEXT DEFAULT 'uz');
         CREATE TABLE IF NOT EXISTS groups(
           id INTEGER PRIMARY KEY, title TEXT NOT NULL, photo INTEGER NOT NULL,
           present INTEGER NOT NULL DEFAULT 1, unit TEXT, manual_unit TEXT);
@@ -35,6 +35,9 @@ class Database:
             self.conn.execute("ALTER TABLE admins ADD COLUMN role TEXT DEFAULT 'admin'")
         if "created_at" not in admin_cols:
             self.conn.execute("ALTER TABLE admins ADD COLUMN created_at REAL")
+        user_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
+        if "lang" not in user_cols:
+            self.conn.execute("ALTER TABLE users ADD COLUMN lang TEXT DEFAULT 'uz'")
         self.conn.commit()
 
     def execute(self, sql, args=()):
@@ -47,6 +50,21 @@ class Database:
 
     def is_admin(self, uid):
         return bool(self.rows("SELECT id FROM admins WHERE id=?", (uid,)))
+
+    def get_lang(self, uid):
+        rows = self.rows("SELECT lang FROM users WHERE id=?", (uid,))
+        if rows and rows[0].get("lang"):
+            return rows[0]["lang"]
+        return "uz"
+
+    def set_lang(self, uid, lang):
+        if lang not in ("uz", "ru", "en"):
+            lang = "uz"
+        self.execute(
+            "INSERT INTO users(id, username, lang) VALUES(?, '', ?) "
+            "ON CONFLICT(id) DO UPDATE SET lang=excluded.lang",
+            (uid, lang)
+        )
 
     def groups(self):
         return self.rows("SELECT * FROM groups ORDER BY title")

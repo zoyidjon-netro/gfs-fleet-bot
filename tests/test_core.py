@@ -481,3 +481,111 @@ def test_admin_crud_api_and_bot_actions(tmp_path, monkeypatch):
     assert any("Administrator muvaffaqiyatli qo'shildi" in c.args[0].text for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage))
 
     db.conn.close()
+
+
+def test_multi_language_support(tmp_path, monkeypatch):
+    from gfs.i18n import t
+    from aiogram.types import Update, Message, CallbackQuery, User, Chat
+    from aiogram.methods import SendMessage, EditMessageText, AnswerCallbackQuery
+
+    # 1. Test i18n dictionary translations
+    assert t("btn_sync", "uz") == "🔄 Sinxronlash"
+    assert t("btn_sync", "ru") == "🔄 Синхронизация"
+    assert t("btn_sync", "en") == "🔄 Synchronize"
+    assert t("btn_sync", "fr") == "🔄 Sinxronlash"  # fallback
+
+    TOKEN = '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'
+    monkeypatch.setenv('DB_PATH', str(tmp_path / 'lang_test.sqlite'))
+    monkeypatch.setenv('ADMIN_IDS', '7')
+    monkeypatch.setenv('BOT_TOKEN', TOKEN)
+
+    app = create_app()
+    client = TestClient(app)
+    headers = {'Authorization': 'tma ' + signed_data(token=TOKEN, uid=7)}
+    dp = app.state.dp
+    db = app.state.db
+    bot = AsyncMock()
+
+    # 2. Test DB language helpers
+    assert db.get_lang(7) == "uz"
+    db.set_lang(7, "ru")
+    assert db.get_lang(7) == "ru"
+    db.set_lang(7, "en")
+    assert db.get_lang(7) == "en"
+    db.set_lang(7, "unknown")
+    assert db.get_lang(7) == "uz"
+
+    # 3. Test API /api/user/lang and /api/state
+    res = client.get('/api/user/lang', headers=headers)
+    assert res.status_code == 200
+    assert res.json()['lang'] == 'uz'
+
+    res_post = client.post('/api/user/lang', headers=headers, json={'lang': 'ru'})
+    assert res_post.status_code == 200
+    assert res_post.json()['lang'] == 'ru'
+    assert db.get_lang(7) == 'ru'
+
+    state = client.get('/api/state', headers=headers).json()
+    assert state['lang'] == 'ru'
+
+    # 4. Test Bot /lang command
+    msg_lang = Message(
+        message_id=301,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        text="/lang"
+    ).as_(bot)
+    bot.reset_mock()
+    asyncio.run(dp.feed_update(bot, Update(update_id=201, message=msg_lang)))
+    send_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage)]
+    assert len(send_calls) >= 1
+    buttons = [btn.callback_data for row in send_calls[0].reply_markup.inline_keyboard for btn in row]
+    assert "adm:lang:uz" in buttons
+    assert "adm:lang:ru" in buttons
+    assert "adm:lang:en" in buttons
+
+    # 5. Test switching to English via callback query
+    msg_box = Message(message_id=302, date=datetime.now(), chat=Chat(id=7, type="private"))
+    q_en = CallbackQuery(
+        id="cb_lang_en",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_lang",
+        message=msg_box,
+        data="adm:lang:en"
+    ).as_(bot)
+    bot.reset_mock()
+    asyncio.run(dp.feed_update(bot, Update(update_id=202, callback_query=q_en)))
+    assert db.get_lang(7) == "en"
+    edit_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert any("Use the buttons below to control the bot" in c.text for c in edit_calls)
+
+    # 6. Test switching to Russian via callback query
+    q_ru = CallbackQuery(
+        id="cb_lang_ru",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_lang",
+        message=msg_box,
+        data="adm:lang:ru"
+    ).as_(bot)
+    bot.reset_mock()
+    asyncio.run(dp.feed_update(bot, Update(update_id=203, callback_query=q_ru)))
+    assert db.get_lang(7) == "ru"
+    edit_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert any("Используйте меню ниже" in c.text for c in edit_calls)
+
+    # 7. Test switching back to Uzbek via callback query
+    q_uz = CallbackQuery(
+        id="cb_lang_uz",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_lang",
+        message=msg_box,
+        data="adm:lang:uz"
+    ).as_(bot)
+    bot.reset_mock()
+    asyncio.run(dp.feed_update(bot, Update(update_id=204, callback_query=q_uz)))
+    assert db.get_lang(7) == "uz"
+    edit_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert any("Botni boshqarish uchun" in c.text for c in edit_calls)
+
+    db.conn.close()

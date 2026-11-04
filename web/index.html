@@ -12,7 +12,7 @@ html.dark{--button:#3b82f6;--button-hover:#2563eb;--on-button:#fff;--success-bg:
 html{background:var(--bg)}button{background:var(--button);color:var(--on-button)}button:hover{background:var(--button-hover)}input::placeholder,textarea::placeholder{color:var(--placeholder);opacity:1}input:focus,select:focus,textarea:focus{border-color:var(--focus)}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible,summary:focus-visible{outline-color:var(--focus)}.status-pill,.dark .status-pill{background:var(--success-bg);color:var(--success-text)}.status-pill.warning,.dark .status-pill.warning{background:var(--warning-bg);color:var(--warning-text)}.status-pill.muted-pill,.dark .status-pill.muted-pill{background:var(--input);color:var(--muted)}.conflict{color:var(--warning-text)!important}.preview,.dark .preview{background:var(--preview-bg)}.bubble,.dark .bubble{background:var(--bubble-bg);color:var(--bubble-text)}.bubble a{color:var(--primary)}.preview-buttons span{background:var(--keyboard-bg);color:var(--keyboard-text)}#status{background:var(--toast-bg);color:var(--toast-text)}.badge{background:var(--soft);color:var(--primary)}.selected-step{background:var(--button)!important;color:var(--on-button)!important;border-color:var(--button)!important}.bottom-nav button:hover{background:var(--soft)}.formatbar button:hover{background:var(--soft)}.hero,.brand-mark{color:#fff}.hero h2{color:#fff}input[type=checkbox]{accent-color:var(--button)}::selection{background:#3b82f64d;color:var(--text)}
 .step-actions{position:static}.steps button{overflow-wrap:normal}#compose .step-actions{margin-bottom:16px}
 </style></head><body><main>
-<header><div class="brand"><div class="brand-mark">G</div><div><h1>Speaker</h1><div class="tag">GFS GROUP · SAFETY & FLEET</div></div></div><button class="secondary" id="refresh">↻ Yangilash</button></header>
+<header><div class="brand"><div class="brand-mark">G</div><div><h1>Speaker</h1><div class="tag">GFS GROUP · SAFETY & FLEET</div></div></div><div style="display:flex;gap:6px;align-items:center"><select id="langSelect" aria-label="Til / Language" style="min-height:36px;padding:4px 8px;font-size:12px;border-radius:10px;width:auto;cursor:pointer"><option value="uz">🇺🇿 UZ</option><option value="ru">🇷🇺 RU</option><option value="en">🇬🇧 EN</option></select><button class="secondary" id="refresh">↻ Yangilash</button></div></header>
 <div class="hero" id="hero"><div class="eyebrow">GFS SPEAKER</div><h2>Bir xabar.<br>Barcha jamoaga.</h2><p>Xabar yarating, yuborish vaqtini belgilang va guruhlarni bir joydan boshqaring.</p></div>
 <nav class="quick-nav" aria-label="Bo‘limlar"><a href="#compose-section">✎ Yangi xabar</a><a href="#groups-section">◎ Guruhlar</a><a href="#jobs-section">◷ Tarqatmalar</a></nav>
 <div id="status" role="status"></div>
@@ -67,6 +67,208 @@ html{background:var(--bg)}button{background:var(--button);color:var(--on-button)
 <section id="groups-section" hidden><div class="section-heading"><div><div class="section-number">02 / GURUHLAR</div><h2>Guruhlar va Unitlar</h2><p class="section-caption">Bog‘lanishlarni ko‘ring va tekshiring.</p></div><button id="sync" class="secondary">↻ Monday bilan solishtirish</button></div><div class="toolbar"><input id="groupSearch" type="search" placeholder="Guruh yoki Unit qidirish" aria-label="Guruh yoki Unit qidirish"><select id="groupFilter" aria-label="Guruh filtri"><option value="all">Barcha guruhlar</option><option value="mapped">Unit bog‘langan</option><option value="conflict">Konflikt</option><option value="eligible">Yuboriladi</option><option value="excluded">Chiqarilgan</option></select></div><datalist id="monday-units"></datalist><div id="groups" class="muted">Yuklanmoqda…</div></section>
 <section id="jobs-section" hidden><div class="section-number">03 / JADVAL</div><h2>Tarqatmalar</h2><p class="section-caption">Rejalar va yuborish natijalari.</p><button type="button" data-go="compose-section">+ Yangi tarqatma</button><div class="toolbar"><input type="search" id="jobSearch" placeholder="Xabar qidirish" aria-label="Xabar qidirish"><select id="jobFilter" aria-label="Tarqatma holati"><option value="all">Barcha holatlar</option><option value="pending">Kutilmoqda</option><option value="recurring">Takroriy</option><option value="running">Yuborilmoqda</option><option value="done">Yakunlangan</option><option value="failed">Xato</option><option value="cancelled">Bekor qilingan</option></select></div><div id="jobs" class="muted">Yuklanmoqda…</div></section>
 <section id="audits" hidden><div class="section-number">COI AUDIT</div><h2>COI tekshiruvi</h2><div class="notice-page"><h2>Natijalar bot chatida</h2><p>COI PDF faylini botga yuboring yoki faylga javoban /check_coi buyrug‘ini yozing. Hozircha audit tarixi Mini App’ga ulanmagan.</p><button id="openBot" class="secondary">Botga qaytish</button></div></section><section id="more" hidden><div class="section-number">SOZLAMALAR</div><h2>Profil va yordam</h2><p class="section-caption" id="profile">Telegram profili</p><div class="item"><strong>Administratorlar</strong><p class="muted">Admin qo‘shish uchun bot chatida /add_admin buyrug‘idan foydalaning. Ro‘yxat hozircha Mini App’da mavjud emas.</p></div><div class="item"><strong>Ko‘rinish</strong><label for="theme">Mavzu</label><select id="theme"><option value="auto">Telegram mavzusi</option><option value="light">Yorug‘</option><option value="dark">Qorong‘i</option></select></div><div class="item"><strong>GFS Speaker</strong><p class="muted">Safety & Fleet · Telegram Mini App</p></div></section></main><nav class="bottom-nav" aria-label="Asosiy navigatsiya"><button data-screen="dashboard" class="active" aria-current="page">⌂<span>Dashboard</span></button><button data-screen="jobs-section">▤<span>Tarqatmalar</span></button><button data-screen="groups-section">◎<span>Guruhlar</span></button><button data-screen="audits">▧<span>Audit</span></button><button data-screen="more">⋯<span>Yana</span></button></nav><script>
+
+let currentLang = localStorage.getItem('gfs-lang') || (tg?.initDataUnsafe?.user?.language_code || 'uz').slice(0, 2);
+if (!['uz', 'ru', 'en'].includes(currentLang)) currentLang = 'uz';
+
+const UI_I18N = {
+    uz: {
+        brand_tag: "GFS GROUP · SAFETY & FLEET",
+        refresh: "↻ Yangilash",
+        hero_eyebrow: "GFS SPEAKER",
+        hero_title: "Bir xabar.<br>Barcha jamoaga.",
+        hero_desc: "Xabar yarating, yuborish vaqtini belgilang va guruhlarni bir joydan boshqaring.",
+        quick_msg: "✎ Yangi xabar",
+        quick_groups: "◎ Guruhlar",
+        quick_jobs: "◷ Tarqatmalar",
+        dashboard: "Dashboard",
+        quick_actions: "Tezkor amallar",
+        quick_caption: "Kerakli bo‘limga o‘ting.",
+        act_new: "+ Yangi tarqatma",
+        act_schedule: "◷ Xabar rejalash",
+        act_view_groups: "◎ Guruhlarni ko‘rish",
+        act_coi: "▤ COI tekshiruvi",
+        recent_activity: "So‘nggi faoliyat",
+        form_title: "Yangi tarqatma",
+        form_caption: "Xabaringiz va yuborish tartibini sozlang.",
+        nav_dash: "Dashboard",
+        nav_jobs: "Tarqatmalar",
+        nav_groups: "Guruhlar",
+        nav_audits: "Audit",
+        nav_more: "Yana",
+        admin_title: "Administratorlar",
+        admin_desc: "Bot va Mini App boshqaruv huquqiga ega adminlar ro‘yxati.",
+        admin_add_btn: "➕ Administrator qo‘shish",
+        admin_add_head: "➕ Yangi administrator qo‘shish",
+        admin_input_ph: "Telegram ID yoki @username (123456789 yoki @foydalanuvchi)",
+        admin_name_ph: "Ism yoki Izoh (ixtiyoriy)",
+        admin_edit: "✏️ Tahrirlash",
+        admin_del: "🗑 O‘chirish",
+        admin_empty: "Administratorlar topilmadi.",
+        admin_del_last: "Oxirgi administratorni o‘chirib bo‘lmaydi!",
+        admin_del_confirm: "#{id} ({name}) administratorni o‘chirishni tasdiqlaysizmi?",
+        admin_added_notice: "Administrator muvaffaqiyatli qo‘shildi",
+        admin_updated_notice: "Administrator ma’lumotlari yangilandi",
+        admin_deleted_notice: "Administrator o‘chirildi",
+        step1: "01 Xabar", step2: "02 Tugmalar", step3: "03 Guruhlar", step4: "04 Vaqt", step5: "05 Tekshirish",
+        btn_next: "Davom etish", btn_back: "Orqaga",
+        btn_save_draft: "Qoralamani saqlash", btn_open_draft: "Qoralamani ochish",
+        btn_send: "Tanlangan guruhlarga yuborish", btn_schedule: "Tarqatmani rejalashtirish",
+        btn_test: "O‘zimga sinov yuborish",
+        recip_all_btn: "📢 Barcha mos guruhlar", recip_custom_btn: "👥 Guruhlarni tanlab jo‘natish",
+        recip_sel_all: "Barchasini tanlash", recip_clear: "Tozalash",
+        recip_search: "Guruh nomi yoki Unit qidirish…",
+        recip_chosen: "Tanlangan", recip_not_chosen: "Tanlanmagan", recip_excluded: "Chiqarilgan"
+    },
+    ru: {
+        brand_tag: "GFS GROUP · SAFETY & FLEET",
+        refresh: "↻ Обновить",
+        hero_eyebrow: "GFS SPEAKER",
+        hero_title: "Одно сообщение.<br>Всей команде.",
+        hero_desc: "Создавайте рассылки, планируйте время и управляйте группами в одном месте.",
+        quick_msg: "✎ Новое сообщение",
+        quick_groups: "◎ Группы",
+        quick_jobs: "◷ Рассылки",
+        dashboard: "Dashboard",
+        quick_actions: "Быстрые действия",
+        quick_caption: "Перейдите в нужный раздел.",
+        act_new: "+ Новая рассылка",
+        act_schedule: "◷ Запланировать",
+        act_view_groups: "◎ Просмотр групп",
+        act_coi: "▤ Проверка COI",
+        recent_activity: "Последняя активность",
+        form_title: "Новая рассылка",
+        form_caption: "Настройте сообщение и расписание отправки.",
+        nav_dash: "Dashboard",
+        nav_jobs: "Рассылки",
+        nav_groups: "Группы",
+        nav_audits: "Аудит",
+        nav_more: "Ещё",
+        admin_title: "Администраторы",
+        admin_desc: "Список администраторов с правами управления ботом и Mini App.",
+        admin_add_btn: "➕ Добавить администратора",
+        admin_add_head: "➕ Добавить нового администратора",
+        admin_input_ph: "Telegram ID или @username (123456789 или @username)",
+        admin_name_ph: "Имя или примечание (необязательно)",
+        admin_edit: "✏️ Редактировать",
+        admin_del: "🗑 Удалить",
+        admin_empty: "Администраторы не найдены.",
+        admin_del_last: "Нельзя удалить последнего администратора!",
+        admin_del_confirm: "Подтвердите удаление администратора #{id} ({name})?",
+        admin_added_notice: "Администратор успешно добавлен",
+        admin_updated_notice: "Данные администратора обновлены",
+        admin_deleted_notice: "Администратор удален",
+        step1: "01 Сообщение", step2: "02 Кнопки", step3: "03 Группы", step4: "04 Время", step5: "05 Проверка",
+        btn_next: "Далее", btn_back: "Назад",
+        btn_save_draft: "Сохранить черновик", btn_open_draft: "Открыть черновик",
+        btn_send: "Отправить в группы", btn_schedule: "Запланировать рассылку",
+        btn_test: "Тестовая отправка себе",
+        recip_all_btn: "📢 Все подходящие группы", recip_custom_btn: "👥 Выбрать группы вручную",
+        recip_sel_all: "Выбрать все", recip_clear: "Очистить",
+        recip_search: "Поиск по названию или Unit…",
+        recip_chosen: "Выбрано", recip_not_chosen: "Не выбрано", recip_excluded: "Исключено"
+    },
+    en: {
+        brand_tag: "GFS GROUP · SAFETY & FLEET",
+        refresh: "↻ Refresh",
+        hero_eyebrow: "GFS SPEAKER",
+        hero_title: "One broadcast.<br>To the whole team.",
+        hero_desc: "Compose messages, schedule deliveries, and manage groups from one place.",
+        quick_msg: "✎ New message",
+        quick_groups: "◎ Groups",
+        quick_jobs: "◷ Broadcasts",
+        dashboard: "Dashboard",
+        quick_actions: "Quick actions",
+        quick_caption: "Navigate to key sections.",
+        act_new: "+ New broadcast",
+        act_schedule: "◷ Schedule message",
+        act_view_groups: "◎ View groups",
+        act_coi: "▤ COI check",
+        recent_activity: "Recent activity",
+        form_title: "New broadcast",
+        form_caption: "Set up your message and delivery schedule.",
+        nav_dash: "Dashboard",
+        nav_jobs: "Broadcasts",
+        nav_groups: "Groups",
+        nav_audits: "Audits",
+        nav_more: "More",
+        admin_title: "Administrators",
+        admin_desc: "List of administrators with management privileges.",
+        admin_add_btn: "➕ Add Administrator",
+        admin_add_head: "➕ Add New Administrator",
+        admin_input_ph: "Telegram ID or @username (123456789 or @username)",
+        admin_name_ph: "Name or note (optional)",
+        admin_edit: "✏️ Edit",
+        admin_del: "🗑 Delete",
+        admin_empty: "No administrators found.",
+        admin_del_last: "Cannot delete the last administrator!",
+        admin_del_confirm: "Confirm deletion of administrator #{id} ({name})?",
+        admin_added_notice: "Administrator added successfully",
+        admin_updated_notice: "Administrator updated successfully",
+        admin_deleted_notice: "Administrator deleted",
+        step1: "01 Message", step2: "02 Buttons", step3: "03 Groups", step4: "04 Time", step5: "05 Review",
+        btn_next: "Continue", btn_back: "Back",
+        btn_save_draft: "Save draft", btn_open_draft: "Open draft",
+        btn_send: "Send to selected groups", btn_schedule: "Schedule broadcast",
+        btn_test: "Send test to myself",
+        recip_all_btn: "📢 All eligible groups", recip_custom_btn: "👥 Select groups manually",
+        recip_sel_all: "Select all", recip_clear: "Clear",
+        recip_search: "Search by group title or Unit…",
+        recip_chosen: "Selected", recip_not_chosen: "Unselected", recip_excluded: "Excluded"
+    }
+};
+
+function uiT(key, params={}) {
+    let str = UI_I18N[currentLang]?.[key] || UI_I18N['uz']?.[key] || key;
+    for (const [k, v] of Object.entries(params)) {
+        str = str.replace(new RegExp('\\{' + k + '\\}', 'g'), v);
+    }
+    return str;
+}
+
+function applyUILang(lang) {
+    if (!['uz', 'ru', 'en'].includes(lang)) lang = 'uz';
+    currentLang = lang;
+    localStorage.setItem('gfs-lang', lang);
+    if ($('langSelect')) $('langSelect').value = lang;
+
+    // Static headings & labels
+    const hero = $('hero');
+    if (hero) {
+        const eyebrow = hero.querySelector('.eyebrow'); if (eyebrow) eyebrow.textContent = uiT('hero_eyebrow');
+        const h2 = hero.querySelector('h2'); if (h2) h2.innerHTML = uiT('hero_title');
+        const p = hero.querySelector('p'); if (p) p.textContent = uiT('hero_desc');
+    }
+    const refreshBtn = $('refresh'); if (refreshBtn) refreshBtn.textContent = uiT('refresh');
+    const formTitle = $('formTitle'); if (formTitle) formTitle.textContent = uiT('form_title');
+    const composeSect = $('compose-section');
+    if (composeSect) {
+        const caption = composeSect.querySelector('.section-caption'); if (caption) caption.textContent = uiT('form_caption');
+    }
+
+    // Bottom nav spans
+    const navButtons = document.querySelectorAll('.bottom-nav button span');
+    const navKeys = ['nav_dash', 'nav_jobs', 'nav_groups', 'nav_audits', 'nav_more'];
+    navButtons.forEach((sp, idx) => { if (navKeys[idx]) sp.textContent = uiT(navKeys[idx]); });
+
+    // Quick nav links
+    const quickLinks = document.querySelectorAll('.quick-nav a');
+    const qKeys = ['quick_msg', 'quick_groups', 'quick_jobs'];
+    quickLinks.forEach((a, idx) => { if (qKeys[idx]) a.textContent = uiT(qKeys[idx]); });
+
+    // Dashboard quick action buttons
+    const qaButtons = document.querySelectorAll('.quick-actions button');
+    const qaKeys = ['act_new', 'act_schedule', 'act_view_groups', 'act_coi'];
+    qaButtons.forEach((btn, idx) => { if (qaKeys[idx]) btn.textContent = uiT(qaKeys[idx]); });
+
+    // Wizard steps
+    const stepButtons = document.querySelectorAll('.steps button');
+    const stepKeys = ['step1', 'step2', 'step3', 'step4', 'step5'];
+    stepButtons.forEach((btn, idx) => { if (stepKeys[idx]) btn.textContent = uiT(stepKeys[idx]); });
+
+    if (typeof updateSubmitLabel === 'function') updateSubmitLabel();
+    if (typeof loadExtras === 'function') loadExtras().catch(()=>{});
+}
 const $=id=>document.getElementById(id), tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();let editing=null,jobs=[],units=[],groups=[];
 function notice(text){$('status').textContent=text;$('status').style.display='block';clearTimeout(notice.timer);notice.timer=setTimeout(()=>$('status').style.display='none',7000)}
 async function api(path,method='GET',body){const headers={Authorization:'tma '+(tg?.initData||'')};if(body && !(body instanceof FormData))headers['Content-Type']='application/json';const r=await fetch('/api/'+path,{method,headers,body:body instanceof FormData?body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail));return data}
@@ -481,6 +683,17 @@ loadExtras=async function(){await extrasWithFacts();const audits=auditCache;late
 const conflictAction=node('button','Unit konfliktlarini ko‘rish','secondary');conflictAction.onclick=()=>{$('groupFilter').value='conflict';renderGroups();showScreen('groups-section')};document.querySelector('.quick-actions').append(conflictAction);
 const completeReview=renderReview;renderReview=function(){completeReview();const list=node('details');list.append(node('summary','Qabul qiluvchilar va chiqarilgan guruhlar'));for(const g of groups.filter(g=>g.present)){const chosen=eligible(g)&&(selectedRecipients===null||selectedRecipients.has(g.id));list.append(node('p',g.title+' · '+(chosen?'Tanlangan':eligible(g)?'Tanlanmagan':'Chiqarilgan: INACTIVE va avatar yo‘q')))}review.append(list);if(attachmentURL&&$('file_id').value){const img=document.createElement('img');img.src=attachmentURL;img.alt='Biriktirilgan media';img.className='attachment-image';review.append(img)}};
 const refreshButtons=buttonRow;buttonRow=function(...args){refreshButtons(...args);const row=$('buttonRows').lastElementChild;row.addEventListener('input',updatePreview);row.addEventListener('change',updatePreview)};
+
+
+if ($('langSelect')) {
+    $('langSelect').value = currentLang;
+    $('langSelect').onchange = e => {
+        const chosen = e.target.value;
+        applyUILang(chosen);
+        api('user/lang', 'POST', {lang: chosen}).catch(()=>{});
+    };
+}
+applyUILang(currentLang);
 
 setStep(0);run(load);
 
