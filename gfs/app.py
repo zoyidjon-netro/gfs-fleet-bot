@@ -19,10 +19,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 
 from .db import Database
-from .domain import validate_init_data, normalize_unit, report, next_weekly, audit_details
+from .domain import validate_init_data, normalize_unit, report, next_weekly, audit_details, eligible
 from .monday import Monday
 from .pdf import parse_pdf
-from .scheduler import scheduler, refresh_groups, send
+from .scheduler import scheduler, refresh_groups, send, execute_job
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -37,6 +37,8 @@ class Broadcast(BaseModel):
     parse_mode: str | None = None
     buttons: list[list[dict[str, str]]] = Field(default_factory=list)
     due: float | None = None
+    schedule_time: str | None = None
+    timezone: str | None = None
     weekly: dict | None = None
     recipients: list[int] | None = None
     source_chat: int | None = None
@@ -70,6 +72,20 @@ class Broadcast(BaseModel):
                     raise ValueError("Tugma URL noto'g'ri")
                 if "callback_data" in button and not 1 <= len(button["callback_data"].encode()) <= 64:
                     raise ValueError("callback_data 1–64 bayt bo'lsin")
+        if self.timezone:
+            try:
+                ZoneInfo(self.timezone)
+            except (ValueError, ZoneInfoNotFoundError):
+                raise ValueError("Vaqt zonasi noto'g'ri")
+        if self.schedule_time:
+            try:
+                tz = ZoneInfo(self.timezone or "Asia/Tashkent")
+                dt = datetime.fromisoformat(self.schedule_time)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=tz)
+                self.due = dt.timestamp()
+            except Exception:
+                raise ValueError("Sana va vaqt formati noto'g'ri")
         if self.due is not None and not time.time() - 60 <= self.due <= time.time() + 366 * 86400:
             raise ValueError("Vaqt kelgusi bir yil ichida bo'lsin")
         if self.weekly:
@@ -229,8 +245,17 @@ def create_app():
     def schedule_payload(payload):
         if payload.weekly:
             w = payload.weekly
-            return next_weekly(datetime.now(timezone.utc), w["weekday"], w["hour"], w["minute"], ZoneInfo(w["timezone"]))
-        return payload.due or time.time()
+            tz_str = w.get("timezone") or payload.timezone or "Asia/Tashkent"
+            return next_weekly(datetime.now(timezone.utc), w["weekday"], w["hour"], w["minute"], ZoneInfo(tz_str))
+        if payload.due is not None:
+            return payload.due
+        if payload.schedule_time:
+            tz = ZoneInfo(payload.timezone or "Asia/Tashkent")
+            dt = datetime.fromisoformat(payload.schedule_time)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=tz)
+            return dt.timestamp()
+        return time.time()
 
     @app.post("/api/jobs")
     async def add_job(payload: Broadcast, uid=Depends(auth)):
@@ -284,8 +309,8 @@ def create_app():
         if webapp_url.startswith("https://"):
             rows.append([InlineKeyboardButton(text="📱 Mini App (Boshqaruv paneli)", web_app=WebAppInfo(url=webapp_url))])
         rows.append([
+            InlineKeyboardButton(text="📨 Xabar tarqatish", callback_data="adm:broadcast_info"),
             InlineKeyboardButton(text="🔄 Sinxronlash", callback_data="adm:sync"),
-            InlineKeyboardButton(text="📋 Guruhlar", callback_data="adm:groups"),
         ])
         rows.append([
             InlineKeyboardButton(text="📊 COI Auditlari", callback_data="adm:audits"),
@@ -441,6 +466,37 @@ def create_app():
         ]
         return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
+    def build_broadcast_info_view():
+        groups = db.groups()
+        present = [g for g in groups if g.get("present")]
+        eligible_groups = [g for g in present if eligible(g.get("title", ""), bool(g.get("photo")))]
+
+        text = (
+            "📨 *Guruhlarga Xabar Tarqatish va Rejalashtirish*\n\n"
+            f"📊 *Faol guruhlar:* {len(present)} ta (Mos: {len(eligible_groups)} ta)\n\n"
+            "Bot quyidagi imkoniyatlarni taqdim etadi:\n"
+            "• 📢 *Barcha guruhlarga* yoki 👥 *Tanlangan guruhlarga* yuborish\n"
+            "• ⚡️ *Hozir jo'natish* yoki ⏰ *Kelajakdagi vaqtga rejalashtirish*\n"
+            "• 🌐 *Vaqt zonalari mosligi:*\n"
+            "   🇺🇿 *Asia (Toshkent)* — UTC+5\n"
+            "   🇺🇸 *USA Central (Chicago, Dallas)* — CT\n"
+            "   🇺🇸 *USA Eastern (New York, Florida)* — ET\n"
+            "   🇺🇸 *USA Pacific (Los Angeles, California)* — PT\n\n"
+            "📌 *Qanday yuborish mumkin:*\n"
+            "1. *Mini App orqali (Tavsiya etiladi):* Guruhlarni tanlash, media, stiker, inline tugmalar va vaqt zonalari kalkulyatori bilan.\n"
+            "2. *Tezkor buyruq:* `/broadcast Matn` — barcha faol guruhlarga darhol matn tarqatish."
+        )
+        rows = []
+        webapp_url = os.getenv("WEBAPP_URL", "")
+        if webapp_url.startswith("https://"):
+            rows.append([InlineKeyboardButton(text="📱 Mini Appda tarqatish yaratish", web_app=WebAppInfo(url=webapp_url))])
+        rows.append([
+            InlineKeyboardButton(text="📋 Guruhlar holati", callback_data="adm:groups"),
+            InlineKeyboardButton(text="⏰ Rejalar ro'yxati", callback_data="adm:jobs"),
+        ])
+        rows.append([InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")])
+        return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
     def build_help_view():
         text = (
             "ℹ️ *GFS Fleet & Safety Bot — Qo'llanma*\n\n"
@@ -585,6 +641,43 @@ def create_app():
             await message.answer("PDF faylga reply qilib /check_coi yuboring")
             return
         await check_coi(message, document)
+
+    @dp.message(Command("broadcast", "tarqatish"))
+    async def broadcast_command(message: Message):
+        if not await known_user(message):
+            return
+        arg = (message.text or "").split(maxsplit=1)
+        if len(arg) < 2 or not arg[1].strip():
+            await message.answer(
+                "ℹ️ *Xabar tarqatish buyrug'i:*\n\n"
+                "`/broadcast Xabar matni`\n\n"
+                "• *Barcha guruhlarga* tezkor matn yuborish uchun xabarni kiriting.\n"
+                "• *Guruhlarni tanlab* va *vaqt zonasi (Asia / USA)* bo'yicha rejalash uchun Mini App'dan foydalaning.",
+                parse_mode="Markdown"
+            )
+            return
+        text_to_send = arg[1].strip()
+        groups = db.groups()
+        eligible_groups = [g for g in groups if g.get("present") and eligible(g.get("title", ""), bool(g.get("photo")))]
+        if not eligible_groups:
+            await message.answer("⚠️ Botda xabar yuborish uchun faol guruhlar mavjud emas.")
+            return
+
+        cursor = db.execute("INSERT INTO jobs(owner,payload,due,state) VALUES(?,?,?,'pending')",
+                            (message.from_user.id, json.dumps({"kind": "text", "text": text_to_send, "recipients": None}), time.time()))
+        job_id = cursor.lastrowid
+        confirm_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"✅ Ha, barchasiga yuborilsin ({len(eligible_groups)} ta)", callback_data=f"adm:send_now:{job_id}")],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"adm:cancel:{job_id}")]
+        ])
+        await message.answer(
+            f"⚠️ *Tarqatmani tasdiqlang:*\n\n"
+            f"📢 *Qabul qiluvchilar:* Barcha faol guruhlar ({len(eligible_groups)} ta)\n"
+            f"📝 *Xabar matni:*\n{text_to_send}\n\n"
+            "_Darhol yuborilsinmi?_",
+            reply_markup=confirm_markup,
+            parse_mode="Markdown"
+        )
 
     @dp.message(Command("source"))
     async def source(message: Message):
@@ -734,6 +827,34 @@ def create_app():
                 text, markup = build_admins_view()
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:broadcast_info":
+                await query.answer()
+                text, markup = build_broadcast_info_view()
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:send_now:"):
+                job_id = int(data.split(":")[-1])
+                row = db.rows("SELECT * FROM jobs WHERE id=? AND state='pending'", (job_id,))
+                if not row:
+                    await query.answer("Vazifa topilmadi yoki allaqachon bajarilgan", show_alert=True)
+                    return
+                await query.answer("🚀 Xabar yuborilmoqda...", show_alert=False)
+                db.execute("UPDATE jobs SET state='running' WHERE id=?", (job_id,))
+                active_bot = bot or query.bot
+                asyncio.create_task(execute_job(active_bot, db, row[0]))
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(
+                        f"🚀 *#{job_id} tarqatish boshlandi!*\n\nNatijalarni `⏰ Rejalar` bo'limida kuzatishingiz mumkin.",
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="⏰ Rejalar ro'yxati", callback_data="adm:jobs")],
+                            [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+                        ]),
+                        parse_mode="Markdown"
+                    )
                 return
 
             if data == "adm:help":

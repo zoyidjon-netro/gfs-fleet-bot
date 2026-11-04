@@ -266,3 +266,55 @@ def test_admin_inline_callbacks(tmp_path, monkeypatch):
     assert any(c.text == "Qabul qilindi" for c in calls3)
 
     db.conn.close()
+
+
+
+def test_broadcast_command_and_timezone_scheduling(tmp_path, monkeypatch):
+    from aiogram.types import Update, Message, CallbackQuery, User, Chat
+    from aiogram.methods import AnswerCallbackQuery, SendMessage
+    monkeypatch.setenv('DB_PATH', str(tmp_path / 'bc_test.sqlite'))
+    monkeypatch.setenv('ADMIN_IDS', '7')
+    monkeypatch.setenv('BOT_TOKEN', '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11')
+    app = create_app()
+    dp = app.state.dp
+    db = app.state.db
+
+    db.save_group(SimpleNamespace(id=10, title="Unit 10 Driver", photo=True))
+    db.save_group(SimpleNamespace(id=20, title="Unit 20 INACTIVE", photo=False))
+
+    bot = AsyncMock()
+
+    # 1. Test Broadcast model with Asia and USA timezones
+    b_chicago = Broadcast(text="Hello US", schedule_time="2026-11-05T14:30", timezone="America/Chicago")
+    b_tashkent = Broadcast(text="Hello UZ", schedule_time="2026-11-05T14:30", timezone="Asia/Tashkent")
+    assert b_chicago.due == 1793910600.0
+    assert b_tashkent.due == 1793871000.0
+    assert b_chicago.due - b_tashkent.due == 11 * 3600
+
+    # 2. Test /broadcast command from admin
+    msg = Message(
+        message_id=1,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        text="/broadcast Diqqat barchaga!"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=10, message=msg)))
+    calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage)]
+    assert any("Diqqat barchaga!" in c.text for c in calls)
+
+    pending_jobs = db.rows("SELECT * FROM jobs WHERE state='pending'")
+    assert len(pending_jobs) == 1
+    job_id = pending_jobs[0]["id"]
+
+    # 3. Test confirming send_now
+    q_send = CallbackQuery(
+        id="cb_send",
+        from_user=User(id=7, is_bot=False, first_name="Admin"),
+        chat_instance="c_send",
+        data=f"adm:send_now:{job_id}"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=11, callback_query=q_send)))
+    assert db.rows(f"SELECT state FROM jobs WHERE id={job_id}")[0]["state"] in ("running", "done")
+
+    db.conn.close()

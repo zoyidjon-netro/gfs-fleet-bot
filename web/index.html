@@ -22,8 +22,46 @@ html{background:var(--bg)}button{background:var(--button);color:var(--on-button)
 <div class="compose-step">02 · Media va tugmalar</div><details><summary>Media yoki manba xabar</summary><label>Fayl biriktirish (20 MB gacha)</label><input type="file" id="upload"><button type="button" id="uploadBtn" class="secondary">Faylni yuklash</button><small>Yuklangan fayl shaxsiy chatingizda ham ko‘rinadi. Stikerni botga yuborib file_id olish ham mumkin.</small><label>Telegram file_id</label><input id="file_id"><div class="row"><div><label>source_chat</label><input id="source_chat" type="number"></div><div><label>source_message</label><input id="source_message" type="number"></div></div><small>Botdagi xabarga /source buyrug‘i bilan reply qilib manba raqamlarini oling.</small></details>
 <details><summary>Inline tugmalar</summary><p class="muted">Havola yoki tasdiqlash tugmalarini qo‘shing. Har bir tugma alohida qatorda chiqadi.</p><div id="buttonRows"></div><button type="button" id="addButton" class="secondary">+ Tugma qo‘shish</button></details>
 <div class="compose-step">03 · Yuborish vaqti</div><label>Yuborish vaqti</label><select id="schedule"><option value="now">Hozir</option><option value="once">Belgilangan vaqtda</option><option value="weekly">Har hafta</option></select>
-<div id="onceFields"><label>Sana va vaqt</label><input type="datetime-local" id="due"><small>Qurilmangizning mahalliy vaqti.</small></div>
-<div id="weeklyFields"><div class="row"><div><label>Hafta kuni</label><select id="weekday"><option value="0">Dushanba</option><option value="1">Seshanba</option><option value="2">Chorshanba</option><option value="3">Payshanba</option><option value="4">Juma</option><option value="5">Shanba</option><option value="6">Yakshanba</option></select></div><div><label>Vaqt</label><input type="time" id="weekly_time" value="15:00"></div></div><label>Vaqt zonasi</label><input id="timezone" value="Asia/Tashkent"></div>
+<div id="onceFields">
+<div class="row">
+<div><label for="due">Sana va vaqt</label><input type="datetime-local" id="due"></div>
+<div><label for="once_timezone">Vaqt zonasi (Asia / USA)</label>
+<select id="once_timezone">
+<optgroup label="🇺🇿 Osiyo (Asia)">
+<option value="Asia/Tashkent" selected>🇺🇿 Asia/Tashkent (O'zbekiston, UTC+5)</option>
+<option value="Asia/Almaty">🇰🇿 Asia/Almaty (Qozog'iston, UTC+5)</option>
+<option value="Asia/Dubai">🇦🇪 Asia/Dubai (Dubay, UTC+4)</option>
+</optgroup>
+<optgroup label="🇺🇸 AQSh (USA)">
+<option value="America/Chicago">🇺🇸 USA Central (Chicago, Dallas) - CT</option>
+<option value="America/New_York">🇺🇸 USA Eastern (New York, Florida) - ET</option>
+<option value="America/Denver">🇺🇸 USA Mountain (Denver, Colorado) - MT</option>
+<option value="America/Los_Angeles">🇺🇸 USA Pacific (California, LA) - PT</option>
+</optgroup>
+</select></div></div>
+<div id="onceComparison" class="helper" style="margin-top:10px;display:none;"></div>
+</div>
+<div id="weeklyFields">
+<div class="row">
+<div><label for="weekday">Hafta kuni</label><select id="weekday"><option value="0">Dushanba</option><option value="1">Seshanba</option><option value="2">Chorshanba</option><option value="3">Payshanba</option><option value="4">Juma</option><option value="5">Shanba</option><option value="6">Yakshanba</option></select></div>
+<div><label for="weekly_time">Vaqt</label><input type="time" id="weekly_time" value="15:00"></div>
+</div>
+<label for="timezone">Vaqt zonasi (Asia / USA)</label>
+<select id="timezone">
+<optgroup label="🇺🇿 Osiyo (Asia)">
+<option value="Asia/Tashkent" selected>🇺🇿 Asia/Tashkent (O'zbekiston, UTC+5)</option>
+<option value="Asia/Almaty">🇰🇿 Asia/Almaty (Qozog'iston, UTC+5)</option>
+<option value="Asia/Dubai">🇦🇪 Asia/Dubai (Dubay, UTC+4)</option>
+</optgroup>
+<optgroup label="🇺🇸 AQSh (USA)">
+<option value="America/Chicago">🇺🇸 USA Central (Chicago, Dallas) - CT</option>
+<option value="America/New_York">🇺🇸 USA Eastern (New York, Florida) - ET</option>
+<option value="America/Denver">🇺🇸 USA Mountain (Denver, Colorado) - MT</option>
+<option value="America/Los_Angeles">🇺🇸 USA Pacific (California, LA) - PT</option>
+</optgroup>
+</select>
+<div id="weeklyComparison" class="helper" style="margin-top:10px;display:none;"></div>
+</div>
 <div class="compose-step">04 · Tekshirish va yuborish</div><p class="helper">ⓘ Yuborish paytida guruhlar tekshiriladi. Nomida INACTIVE bo‘lgan va avatari yo‘q guruhlarga yuborilmaydi.</p><div class="actions">
 <button type="button" id="preview" class="secondary">O‘zimga sinov yuborish</button><button type="submit">Tarqatmani saqlash</button><button type="button" id="reset" class="secondary">Tozalash</button></div></form></section>
 <section id="groups-section" hidden><div class="section-heading"><div><div class="section-number">02 / GURUHLAR</div><h2>Guruhlar va Unitlar</h2><p class="section-caption">Bog‘lanishlarni ko‘ring va tekshiring.</p></div><button id="sync" class="secondary">↻ Monday bilan solishtirish</button></div><div class="toolbar"><input id="groupSearch" type="search" placeholder="Guruh yoki Unit qidirish" aria-label="Guruh yoki Unit qidirish"><select id="groupFilter" aria-label="Guruh filtri"><option value="all">Barcha guruhlar</option><option value="mapped">Unit bog‘langan</option><option value="conflict">Konflikt</option><option value="eligible">Yuboriladi</option><option value="excluded">Chiqarilgan</option></select></div><datalist id="monday-units"></datalist><div id="groups" class="muted">Yuklanmoqda…</div></section>
@@ -33,7 +71,80 @@ const $=id=>document.getElementById(id), tg=window.Telegram?.WebApp;tg?.ready();
 function notice(text){$('status').textContent=text;$('status').style.display='block';clearTimeout(notice.timer);notice.timer=setTimeout(()=>$('status').style.display='none',7000)}
 async function api(path,method='GET',body){const headers={Authorization:'tma '+(tg?.initData||'')};if(body && !(body instanceof FormData))headers['Content-Type']='application/json';const r=await fetch('/api/'+path,{method,headers,body:body instanceof FormData?body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail));return data}
 async function run(fn){try{await fn()}catch(e){notice(e.message);if(String(e.message).includes('Kirish ruxsati')){document.getElementById('metrics').innerHTML='';document.getElementById('activity').textContent='Kirish cheklangan. Mini App’ni administrator sifatida bot orqali oching.'}}}
-function scheduleFields(){ $('onceFields').style.display=$('schedule').value==='once'?'block':'none';$('weeklyFields').style.display=$('schedule').value==='weekly'?'block':'none'}$('schedule').onchange=scheduleFields;
+
+function getTimestampForTimezone(isoDateTime, timeZone) {
+    if (!isoDateTime) return null;
+    const parts = isoDateTime.split('T');
+    if (parts.length < 2) return null;
+    const [datePart, timePart] = parts;
+    const [year, month, day] = datePart.split('-').map(Number);
+    const [hours, minutes] = timePart.split(':').map(Number);
+    let utcDate = new Date(Date.UTC(year, month - 1, day, hours, minutes));
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: 'numeric', second: 'numeric',
+        hour12: false
+    });
+    function getOffset(d) {
+        const parts = formatter.formatToParts(d);
+        const map = {};
+        for (const p of parts) map[p.type] = p.value;
+        let h = Number(map.hour);
+        if (h === 24) h = 0;
+        const targetAsUtc = Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day), h, Number(map.minute), Number(map.second));
+        return targetAsUtc - d.getTime();
+    }
+    let offset = getOffset(utcDate);
+    let corrected = new Date(utcDate.getTime() - offset);
+    return corrected.getTime() / 1000;
+}
+
+function updateComparisonBox() {
+    const sched = $('schedule').value;
+    if (sched === 'once') {
+        const val = $('due').value;
+        const tz = $('once_timezone')?.value || 'Asia/Tashkent';
+        const box = $('onceComparison');
+        if (!val || !box) return;
+        const ts = getTimestampForTimezone(val, tz);
+        if (!ts) { box.style.display = 'none'; return; }
+        const d = new Date(ts * 1000);
+        const fmt = (z) => new Intl.DateTimeFormat('uz-UZ', {
+            timeZone: z,
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit',
+            hour12: false
+        }).format(d);
+        box.innerHTML = `
+            <strong>🕒 Vaqt zonalari bo‘yicha taqqoslash:</strong><br>
+            🇺🇿 <b>Toshkent (Asia):</b> ${fmt('Asia/Tashkent')}<br>
+            🇺🇸 <b>AQSh Central (Chicago):</b> ${fmt('America/Chicago')}<br>
+            🇺🇸 <b>AQSh Eastern (New York):</b> ${fmt('America/New_York')}<br>
+            🇺🇸 <b>AQSh Pacific (Los Angeles):</b> ${fmt('America/Los_Angeles')}
+        `;
+        box.style.display = 'block';
+    } else if (sched === 'weekly') {
+        const tz = $('timezone')?.value || 'Asia/Tashkent';
+        const [h, m] = ($('weekly_time')?.value || '15:00').split(':').map(Number);
+        const dayIdx = Number($('weekday')?.value || 0);
+        const days = ['Dushanba', 'Seshanba', 'Chorshanba', 'Payshanba', 'Juma', 'Shanba', 'Yakshanba'];
+        const box = $('weeklyComparison');
+        if (!box) return;
+        box.innerHTML = `<strong>🔄 Reja:</strong> Har ${days[dayIdx]} soat ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} (${tz})`;
+        box.style.display = 'block';
+    } else {
+        if ($('onceComparison')) $('onceComparison').style.display = 'none';
+        if ($('weeklyComparison')) $('weeklyComparison').style.display = 'none';
+    }
+}
+
+function scheduleFields(){ $('onceFields').style.display=$('schedule').value==='once'?'block':'none';$('weeklyFields').style.display=$('schedule').value==='weekly'?'block':'none'}$('schedule').onchange=()=>{ scheduleFields(); updateComparisonBox(); };
+if ($('due')) $('due').oninput = updateComparisonBox;
+if ($('once_timezone')) $('once_timezone').onchange = updateComparisonBox;
+if ($('timezone')) $('timezone').onchange = updateComparisonBox;
+if ($('weekly_time')) $('weekly_time').oninput = updateComparisonBox;
+if ($('weekday')) $('weekday').onchange = updateComparisonBox;
 function buttonRow(button={},group=null){const box=document.createElement('div');box.className='row item';box.dataset.group=group??('new-'+Date.now()+'-'+Math.random());const title=document.createElement('input');title.placeholder='Tugma matni';title.value=button.text||'';const target=document.createElement('input');target.placeholder='https://... yoki callback qiymati';target.value=button.url||button.callback_data||'';const type=document.createElement('select');for(const [v,t] of [['url','Havola'],['callback_data','Tasdiqlash']]){const o=document.createElement('option');o.value=v;o.textContent=t;type.append(o)}type.value=button.callback_data?'callback_data':'url';const up=document.createElement('button');up.type='button';up.className='secondary';up.textContent='↑';up.setAttribute('aria-label','Tugmani yuqoriga');up.onclick=()=>{if(box.previousElementSibling)box.parentNode.insertBefore(box,box.previousElementSibling);updatePreview()};const down=document.createElement('button');down.type='button';down.className='secondary';down.textContent='↓';down.setAttribute('aria-label','Tugmani pastga');down.onclick=()=>{if(box.nextElementSibling)box.parentNode.insertBefore(box.nextElementSibling,box);updatePreview()};const remove=document.createElement('button');remove.type='button';remove.className='secondary';remove.textContent='O‘chirish';remove.onclick=()=>{box.remove();updatePreview()};box.append(title,target,type,up,down,remove);$('buttonRows').append(box)}
 $('addButton').onclick=()=>{buttonRow();updatePreview()};
 $('kind').onchange=()=>{ $('file_id').value=''; $('upload').value=''; };
@@ -97,12 +208,241 @@ document.querySelectorAll('[data-screen]').forEach((b,i)=>{for(const child of [.
 function viewport(){document.documentElement.style.setProperty('--app-height',(tg?.viewportStableHeight||window.innerHeight)+'px')}tg?.onEvent('viewportChanged',viewport);window.addEventListener('resize',viewport);viewport();
 $('kind').addEventListener('change',()=>{attachment.replaceChildren();updatePreview()});$('parse_mode').addEventListener('change',updatePreview);
 
+let recipientMode='all'; // 'all' or 'custom'
 let selectedRecipients=null;
-const basePayload=payload;payload=function(){const value=basePayload();value.recipients=selectedRecipients===null?null:[...selectedRecipients];return value};
-const baseRecipientRender=renderRecipients;renderRecipients=function(){recipients.replaceChildren();const search=node('input');search.type='search';search.placeholder='Guruh qidirish';search.setAttribute('aria-label','Qabul qiluvchi guruh qidirish');const all=node('button','Barcha mos guruhlarni tanlash','secondary');all.type='button';all.onclick=()=>{selectedRecipients=new Set(groups.filter(eligible).map(g=>g.id));renderRecipients();renderReview()};const list=node('div');const count=node('p',undefined,'muted');recipients.append(count,search,all,list);function draw(){list.replaceChildren();const chosen=selectedRecipients===null?groups.filter(eligible).map(g=>g.id):[...selectedRecipients];count.textContent=`Jami: ${groups.filter(g=>g.present).length} · Mos: ${groups.filter(eligible).length} · Tanlangan: ${chosen.length}`;for(const g of groups.filter(g=>g.present&&g.title.toLowerCase().includes(search.value.toLowerCase()))){const label=node('label',undefined,'item');label.style.display='flex';label.style.gap='12px';const check=node('input');check.type='checkbox';check.style.width='22px';check.style.flex='0 0 22px';check.checked=chosen.includes(g.id);check.disabled=!eligible(g);check.onchange=()=>{if(selectedRecipients===null)selectedRecipients=new Set(chosen);if(check.checked)selectedRecipients.add(g.id);else selectedRecipients.delete(g.id);draw()};label.append(check,node('span',g.title+(eligible(g)?'':' — INACTIVE va avatar yo‘q')));list.append(label)}}search.oninput=draw;draw()};
-const baseReview=renderReview;renderReview=function(){baseReview();const paragraph=review.querySelector('p.muted');if(paragraph)paragraph.textContent='Tanlangan guruhlar: '+(selectedRecipients===null?groups.filter(eligible).length:selectedRecipients.size)+'. Yuborish paytida holat qayta tekshiriladi.'};
-const validateBase=validateStep;validateStep=function(step){validateBase(step);if(step===2&&selectedRecipients!==null&&!selectedRecipients.size)throw Error('Kamida bitta guruh tanlang')};
-const editBase=edit;edit=function(job){editBase(job);selectedRecipients=job.payload.recipients===null||job.payload.recipients===undefined?null:new Set(job.payload.recipients);renderRecipients();renderReview()};
+
+const basePayload=payload;
+payload=function(){
+    const value=basePayload();
+    if(recipientMode==='all'){
+        value.recipients=null;
+    } else {
+        value.recipients=selectedRecipients===null?null:[...selectedRecipients];
+    }
+    const sched=$('schedule').value;
+    if(sched==='once'){
+        const val=$('due').value;
+        const tz=$('once_timezone')?.value||'Asia/Tashkent';
+        if(val){
+            value.timezone=tz;
+            value.schedule_time=val;
+            const ts=getTimestampForTimezone(val,tz);
+            if(ts)value.due=ts;
+        }
+    } else if(sched==='weekly'){
+        if(value.weekly){
+            value.weekly.timezone=$('timezone')?.value||'Asia/Tashkent';
+            value.timezone=value.weekly.timezone;
+        }
+    }
+    return value;
+};
+
+const baseRecipientRender=renderRecipients;
+renderRecipients=function(){
+    recipients.replaceChildren();
+    const eligibleCount=groups.filter(eligible).length;
+    
+    // Mode toggles: Barcha guruhlar vs Tanlangan guruhlar
+    const modeRow=node('div',undefined,'row');
+    modeRow.style.marginBottom='16px';
+    const btnAll=node('button',`📢 Barcha mos guruhlar (${eligibleCount} ta)`,recipientMode==='all'?'':'secondary');
+    btnAll.type='button';
+    btnAll.onclick=()=>{
+        recipientMode='all';
+        selectedRecipients=null;
+        renderRecipients();
+        renderReview();
+    };
+    
+    const btnCustom=node('button','👥 Guruhlarni tanlab jo‘natish',recipientMode==='custom'?'':'secondary');
+    btnCustom.type='button';
+    btnCustom.onclick=()=>{
+        recipientMode='custom';
+        if(selectedRecipients===null){
+            selectedRecipients=new Set(groups.filter(eligible).map(g=>g.id));
+        }
+        renderRecipients();
+        renderReview();
+    };
+    modeRow.append(btnAll,btnCustom);
+    recipients.append(modeRow);
+
+    if(recipientMode==='all'){
+        const banner=node('div',undefined,'helper');
+        banner.innerHTML=`<strong>📢 Barcha guruhlarga yuborish rejimi tanlandi.</strong><br>Xabar avtomatik ravishda barcha faol va yuborishga mos guruhlarga (${eligibleCount} ta) tarqatiladi.`;
+        recipients.append(banner);
+
+        const listDiv=node('div');
+        for(const g of groups.filter(g=>g.present)){
+            const item=node('div',undefined,'item');
+            item.style.display='flex';
+            item.style.alignItems='center';
+            item.style.gap='10px';
+            const icon=node('span',eligible(g)?'✓':'✗');
+            icon.style.fontWeight='bold';
+            icon.style.color=eligible(g)?'#16a34a':'#dc2626';
+            const unitText=g.manual_unit||g.unit?` · Unit ${g.manual_unit||g.unit}`:'';
+            const textSpan=node('span',g.title+unitText);
+            const statusSpan=node('span',eligible(g)?'Yuboriladi':'Chiqarilgan','status-pill '+(eligible(g)?'':'warning'));
+            statusSpan.style.marginLeft='auto';
+            item.append(icon,textSpan,statusSpan);
+            listDiv.append(item);
+        }
+        recipients.append(listDiv);
+    } else {
+        const toolbar=node('div',undefined,'toolbar');
+        const search=node('input');
+        search.type='search';
+        search.placeholder='Guruh nomi yoki Unit qidirish…';
+
+        const btnSelAll=node('button','Barchasini tanlash','secondary');
+        btnSelAll.type='button';
+        btnSelAll.onclick=()=>{
+            selectedRecipients=new Set(groups.filter(eligible).map(g=>g.id));
+            drawCustom();
+            renderReview();
+        };
+
+        const btnClear=node('button','Tozalash','secondary');
+        btnClear.type='button';
+        btnClear.onclick=()=>{
+            selectedRecipients.clear();
+            drawCustom();
+            renderReview();
+        };
+        toolbar.append(search,btnSelAll,btnClear);
+
+        const counter=node('p',undefined,'muted');
+        const listDiv=node('div');
+
+        function drawCustom(){
+            const q=search.value.toLowerCase();
+            const chosen=selectedRecipients||new Set();
+            counter.textContent=`Tanlangan: ${chosen.size} / ${eligibleCount} ta faol guruh`;
+            listDiv.replaceChildren();
+
+            const filtered=groups.filter(g=>g.present&&(g.title.toLowerCase().includes(q)||String(g.manual_unit||g.unit||'').includes(q)));
+            if(!filtered.length){
+                listDiv.append(node('p','Mos guruh topilmadi','empty'));
+                return;
+            }
+
+            for(const g of filtered){
+                const label=node('label',undefined,'item');
+                label.style.display='flex';
+                label.style.alignItems='center';
+                label.style.gap='12px';
+                label.style.cursor=eligible(g)?'pointer':'default';
+
+                const check=node('input');
+                check.type='checkbox';
+                check.style.width='20px';
+                check.style.height='20px';
+                check.style.flexShrink='0';
+                check.checked=chosen.has(g.id);
+                check.disabled=!eligible(g);
+                check.onchange=e=>{
+                    e.stopPropagation();
+                    if(check.checked)chosen.add(g.id);
+                    else chosen.delete(g.id);
+                    drawCustom();
+                    renderReview();
+                };
+
+                const unit=g.manual_unit||g.unit;
+                const unitStr=unit?`Unit ${unit}`:'⚠️ Unit aniqlanmagan';
+                const bodyDiv=node('div');
+                bodyDiv.style.flex='1';
+                bodyDiv.innerHTML=`<strong>${g.title}</strong><div style="font-size:12px;color:var(--muted);">${unitStr}</div>`;
+
+                const pill=node('span',eligible(g)?(check.checked?'Tanlangan':'Tanlanmagan'):'Chiqarilgan','status-pill '+(eligible(g)?(check.checked?'':'muted-pill'):'warning'));
+                label.append(check,bodyDiv,pill);
+
+                label.onclick=e=>{
+                    if(e.target!==check&&eligible(g)){
+                        check.checked=!check.checked;
+                        if(check.checked)chosen.add(g.id);
+                        else chosen.delete(g.id);
+                        drawCustom();
+                        renderReview();
+                    }
+                };
+                listDiv.append(label);
+            }
+        }
+        search.oninput=drawCustom;
+        drawCustom();
+        recipients.append(toolbar,counter,listDiv);
+    }
+};
+
+const baseReview=renderReview;
+renderReview=function(){
+    baseReview();
+    const paragraph=review.querySelector('p.muted');
+    if(paragraph){
+        if(recipientMode==='all'||selectedRecipients===null){
+            paragraph.textContent=`📢 Qabul qiluvchilar: Barcha mos guruhlar (${groups.filter(eligible).length} ta).`;
+        } else {
+            paragraph.textContent=`👥 Qabul qiluvchilar: ${selectedRecipients.size} ta tanlangan guruh.`;
+        }
+    }
+};
+
+const validateBase=validateStep;
+validateStep=function(step){
+    validateBase(step);
+    if(step===2&&recipientMode==='custom'&&(!selectedRecipients||!selectedRecipients.size)){
+        throw Error('Kamida bitta guruhni tanlang yoki "Barcha guruhlar" rejimini tanlang');
+    }
+    if(step===3){
+        const sched=$('schedule').value;
+        if(sched==='once'){
+            if(!$('due').value)throw Error('Sana va vaqtni tanlang');
+            const ts=getTimestampForTimezone($('due').value,$('once_timezone')?.value||'Asia/Tashkent');
+            if(ts<=Date.now()/1000)throw Error('Kelajakdagi sana va vaqtni tanlang');
+        }
+    }
+};
+
+const editBase=edit;
+edit=function(job){
+    editBase(job);
+    const p=job.payload;
+    if(p.recipients===null||p.recipients===undefined){
+        recipientMode='all';
+        selectedRecipients=null;
+    } else {
+        recipientMode='custom';
+        selectedRecipients=new Set(p.recipients);
+    }
+    if(p.weekly){
+        $('schedule').value='weekly';
+        $('weekday').value=p.weekly.weekday;
+        $('weekly_time').value=[p.weekly.hour,p.weekly.minute].map(x=>String(x).padStart(2,'0')).join(':');
+        if($('timezone'))$('timezone').value=p.weekly.timezone||'Asia/Tashkent';
+    } else if(p.due){
+        $('schedule').value='once';
+        const tz=p.timezone||'Asia/Tashkent';
+        if($('once_timezone'))$('once_timezone').value=tz;
+        try{
+            const d=new Date(p.due*1000);
+            const parts=new Intl.DateTimeFormat('en-US',{
+                timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',
+                hour:'2-digit',minute:'2-digit',hour12:false
+            }).formatToParts(d);
+            const m={};
+            for(const pt of parts)m[pt.type]=pt.value;
+            let h=m.hour==='24'?'00':m.hour;
+            $('due').value=`${m.year}-${m.month}-${m.day}T${h}:${m.minute}`;
+        }catch{}
+    }
+    scheduleFields();
+    updateComparisonBox();
+    renderRecipients();
+    renderReview();
+};
 const saveDraft=node('button','Qoralamani saqlash','secondary');saveDraft.type='button';saveDraft.onclick=()=>{try{const fields={};for(const id of ['text','kind','file_id','parse_mode','source_chat','source_message','schedule','due','weekday','weekly_time','timezone'])fields[id]=$(id).value;const buttons=[...$('buttonRows').children].map(row=>{const [text,value,type]=row.querySelectorAll('input,select');return {text:text.value,[type.value]:value.value}});localStorage.setItem('gfs-draft-'+(user?.id||'local'),JSON.stringify({fields,buttons,recipients:selectedRecipients===null?null:[...selectedRecipients]}));notice('Qoralama shu qurilmada saqlandi')}catch{notice('Brauzerda qoralama saqlab bo‘lmadi')}};const restoreDraft=node('button','Qoralamani ochish','secondary');restoreDraft.type='button';restoreDraft.onclick=()=>{try{const raw=localStorage.getItem('gfs-draft-'+(user?.id||'local'));if(!raw){notice('Qoralama yo‘q');return}const d=JSON.parse(raw);for(const [id,value] of Object.entries(d.fields))if($(id))$(id).value=value;$('buttonRows').replaceChildren();d.buttons.forEach(b=>buttonRow(b));selectedRecipients=d.recipients===null?null:new Set(d.recipients);scheduleFields();currentStep=0;setStep(0);updatePreview();notice('Qoralama ochildi')}catch{notice('Qoralamani ochib bo‘lmadi')}};stepActions.before(saveDraft,restoreDraft);
 const auditBox=node('div');$('audits').replaceChildren(node('h2','COI audit tarixi'),node('p','Yangi COI uchun PDFni bot chatiga yuboring.','helper'),auditBox);
 const adminBox=node('div');const adminForm=document.createElement('form');adminForm.append(node('h2','Administrator qo‘shish'));const adminID=node('input');adminID.type='number';adminID.min='1';adminID.required=true;adminID.placeholder='Telegram User ID';adminID.setAttribute('aria-label','Yangi administrator Telegram User ID');const addAdmin=node('button','Administrator qo‘shish');addAdmin.type='submit';adminForm.append(adminID,addAdmin);adminForm.onsubmit=e=>{e.preventDefault();run(async()=>{const id=Number(adminID.value);if(!Number.isSafeInteger(id)||id<=0)throw Error('To‘g‘ri Telegram User ID kiriting');if(!confirm(id+' foydalanuvchiga bot boshqaruvi uchun ruxsat berilsinmi?'))return;await api('admins','POST',{user_id:id});notice('Administrator qo‘shildi');await loadExtras()})};const moreItems=$('more').querySelector('.item');moreItems.replaceChildren(node('h2','Administratorlar'),adminBox,adminForm);
