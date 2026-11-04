@@ -380,6 +380,9 @@ function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefi
 async function load(){const s=await api('state');jobs=s.jobs;groups=s.groups;renderDashboard();renderGroups();renderJobs()}
 function isGroupActive(g){if(!g.present)return false;if(g.status==='active')return true;if(g.status==='inactive')return false;return eligible(g)}
 function eligible(g){return !!g.present && !(/\bINACTIVE\b/i.test(g.title)&&!g.photo)}
+let groupsCurrentPage = 0;
+const GROUPS_PAGE_SIZE = 10;
+
 function renderGroups(){
     const query=$('groupSearch').value.toLowerCase(),filter=$('groupFilter').value;
     const shown=groups.filter(g=>{
@@ -396,8 +399,13 @@ function renderGroups(){
         if(filter==='excluded')return !isAct;
         return true;
     });
+
+    const totalGroupPages = Math.max(1, Math.ceil(shown.length / GROUPS_PAGE_SIZE));
+    groupsCurrentPage = Math.max(0, Math.min(groupsCurrentPage, totalGroupPages - 1));
+    const pageShown = shown.slice(groupsCurrentPage * GROUPS_PAGE_SIZE, (groupsCurrentPage + 1) * GROUPS_PAGE_SIZE);
+
     $('groups').replaceChildren();
-    for(const g of shown){
+    for(const g of pageShown){
         const box=node('div',undefined,'item');
         const unit=g.manual_unit||g.unit;
         const isAct=isGroupActive(g);
@@ -449,6 +457,33 @@ function renderGroups(){
         box.append(actRow);
         $('groups').append(box);
     }
+
+    if(totalGroupPages > 1){
+        const pagDiv = node('div');
+        pagDiv.style.display = 'flex';
+        pagDiv.style.alignItems = 'center';
+        pagDiv.style.justifyContent = 'space-between';
+        pagDiv.style.margin = '16px 0';
+        pagDiv.style.padding = '8px 12px';
+        pagDiv.style.background = 'var(--soft, #1e293b)';
+        pagDiv.style.borderRadius = '8px';
+
+        const prevBtn = node('button', '⬅️ Oldingi', 'secondary');
+        prevBtn.type = 'button';
+        prevBtn.disabled = (groupsCurrentPage === 0);
+        prevBtn.onclick = () => { groupsCurrentPage--; renderGroups(); };
+
+        const pageInfo = node('span', `Sahifa ${groupsCurrentPage + 1} / ${totalGroupPages} (Jami: ${shown.length} ta, 10 tadan)`, 'muted');
+
+        const nextBtn = node('button', 'Keyingi ➡️', 'secondary');
+        nextBtn.type = 'button';
+        nextBtn.disabled = (groupsCurrentPage >= totalGroupPages - 1);
+        nextBtn.onclick = () => { groupsCurrentPage++; renderGroups(); };
+
+        pagDiv.append(prevBtn, pageInfo, nextBtn);
+        $('groups').append(pagDiv);
+    }
+
     if(!shown.length)$('groups').textContent=groups.length?'Mos guruh topilmadi.':'Botni ishchi guruhlarga qo‘shing.';
 }
 function renderJobs(){const query=$('jobSearch').value.toLowerCase(),filter=$('jobFilter').value;const shown=jobs.filter(j=>(j.payload.text||j.payload.kind).toLowerCase().includes(query)&&(filter==='all'||filter==='recurring'&&!!j.payload.weekly||filter===j.state));$('jobs').replaceChildren();for(const j of shown){const box=node('div',undefined,'item');const labels={pending:'Kutilmoqda',running:'Yuborilmoqda',done:'Yakunlangan',failed:'Xato',cancelled:'Bekor qilingan'};const head=node('div',undefined,'job-heading');head.append(node('strong','#'+j.id),node('span',j.payload.weekly&&j.state==='pending'?'Haftalik':labels[j.state]||j.state,'status-pill '+(['failed','cancelled'].includes(j.state)?'warning':'')));box.append(head,node('div',new Date(j.due*1000).toLocaleString(),'job-date'),node('div',(j.payload.text||j.payload.kind).slice(0,180)),node('div','Yuborilgan: '+j.deliveries.filter(d=>d.state==='sent').length+' · Xato: '+j.deliveries.filter(d=>d.state==='failed').length+(j.payload.kind!=='text'?' · Media biriktirilgan':'')));if(j.payload.weekly)box.append(node('small','Har hafta · '+j.payload.weekly.timezone));if(j.last_error)box.append(node('p',j.last_error));const detail=node('details'),summary=node('summary','Yuborish natijalari');detail.append(summary,node('pre',j.deliveries.map(d=>`${d.chat}: ${d.state}${d.error?' — '+d.error:''}`).join('\n')||'Hali yuborilmagan'));box.append(detail);if(j.state==='pending'){const b=node('button','Tahrirlash','secondary');b.onclick=()=>{showScreen('compose-section');edit(j)};box.append(b)}if(['pending','running'].includes(j.state)){const b=node('button','Bekor qilish','secondary');b.onclick=()=>run(async()=>{if(!confirm('Bu tarqatmani bekor qilasizmi?'))return;await api('jobs/'+j.id,'DELETE');await load();notice('Bekor qilindi')});box.append(b)}$('jobs').append(box)}if(!shown.length)$('jobs').textContent=jobs.length?'Mos tarqatma topilmadi.':'Tarqatmalar yo‘q.'}
@@ -457,7 +492,7 @@ function showScreen(id){for(const el of document.querySelectorAll('main > sectio
 for(const b of document.querySelectorAll('[data-screen]'))b.onclick=()=>showScreen(b.dataset.screen);for(const b of document.querySelectorAll('[data-go]'))b.onclick=()=>showScreen(b.dataset.go);tg?.BackButton?.onClick(()=>showScreen('dashboard'));$('openBot').onclick=()=>tg?.close();
 function renderDashboard(){const metrics=[['Guruhlar',groups.filter(g=>g.present).length],['Yuborishga mos',groups.filter(eligible).length],['Rejalashtirilgan',jobs.filter(j=>j.state==='pending').length],['Yakunlangan',jobs.filter(j=>j.state==='done').length],['Unit konfliktlari',groups.filter(g=>g.present&&!g.unit&&!g.manual_unit).length],['COI ogohlantirishlari','—']];$('metrics').replaceChildren(...metrics.map(([label,value])=>{const d=node('div',undefined,'metric');d.append(node('strong',String(value)),node('span',label));return d}));const items=jobs.slice(0,3);$('activity').replaceChildren();if(!items.length){$('activity').textContent='Hozircha faoliyat mavjud emas.';return}for(const j of items){const d=node('div',undefined,'item');d.append(node('strong',(j.payload.text||j.payload.kind).slice(0,60)),node('div',j.state+' · '+new Date(j.due*1000).toLocaleString()));$('activity').append(d)}}
 document.querySelectorAll('[data-format]').forEach(button=>button.addEventListener('click',()=>{const field=$('text'),start=field.selectionStart,end=field.selectionEnd,selected=field.value.slice(start,end);if(!selected){notice('Formatlash uchun matnni belgilang');field.focus();return}$('parse_mode').value='HTML';const tag=button.dataset.format,open='<'+tag+'>',close='</'+tag+'>';field.setRangeText(open+selected+close,start,end,'select');field.focus();updatePreview()}));
-function updatePreview(){const value=$('text').value;$('charCount').textContent=value.length+' / '+($('kind').value==='text'?4096:1024);$('messagePreview').textContent=value||'Xabar ko‘rinishi shu yerda paydo bo‘ladi';$('previewButtons').replaceChildren(...[...$('buttonRows').children].map(row=>node('span',row.querySelector('input')?.value||'Tugma')))}$('compose').addEventListener('input',updatePreview);$('groupSearch').oninput=renderGroups;$('groupFilter').onchange=renderGroups;$('jobSearch').oninput=renderJobs;$('jobFilter').onchange=renderJobs;$('today').textContent=new Date().toLocaleDateString('uz-UZ',{weekday:'long',year:'numeric',month:'long',day:'numeric'});const user=tg?.initDataUnsafe?.user;$('profile').textContent=user?`${user.first_name||''} ${user.last_name||''} · ${user.id}`:'Telegram orqali oching';const systemTheme=window.matchMedia('(prefers-color-scheme: dark)');
+function updatePreview(){const value=$('text').value;$('charCount').textContent=value.length+' / '+($('kind').value==='text'?4096:1024);$('messagePreview').textContent=value||'Xabar ko‘rinishi shu yerda paydo bo‘ladi';$('previewButtons').replaceChildren(...[...$('buttonRows').children].map(row=>node('span',row.querySelector('input')?.value||'Tugma')))}$('compose').addEventListener('input',updatePreview);$('groupSearch').oninput=()=>{groupsCurrentPage=0;renderGroups()};$('groupFilter').onchange=()=>{groupsCurrentPage=0;renderGroups()};$('jobSearch').oninput=renderJobs;$('jobFilter').onchange=renderJobs;$('today').textContent=new Date().toLocaleDateString('uz-UZ',{weekday:'long',year:'numeric',month:'long',day:'numeric'});const user=tg?.initDataUnsafe?.user;$('profile').textContent=user?`${user.first_name||''} ${user.last_name||''} · ${user.id}`:'Telegram orqali oching';const systemTheme=window.matchMedia('(prefers-color-scheme: dark)');
 try{const stored=localStorage.getItem('gfs-theme');if(['auto','light','dark'].includes(stored))$('theme').value=stored}catch{}
 function applyTheme(){const pref=$('theme').value;const dark=pref==='dark'||pref==='auto'&&(tg?.initData?tg.colorScheme==='dark':systemTheme.matches);document.documentElement.classList.toggle('dark',dark);document.documentElement.dataset.theme=dark?'dark':'light';const bg=dark?'#0d1626':'#f5f7fb';let meta=document.querySelector('meta[name=theme-color]');if(!meta){meta=document.createElement('meta');meta.name='theme-color';document.head.append(meta)}meta.content=bg;if(tg?.initData){try{tg.setHeaderColor?.(bg);tg.setBackgroundColor?.(bg)}catch{}}}
 $('theme').onchange=()=>{try{localStorage.setItem('gfs-theme',$('theme').value)}catch{}applyTheme()};tg?.onEvent('themeChanged',applyTheme);systemTheme.addEventListener?.('change',()=>{if($('theme').value==='auto')applyTheme()});applyTheme();

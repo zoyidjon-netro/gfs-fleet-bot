@@ -1084,3 +1084,72 @@ def test_bot_group_status_management_and_detail_view(tmp_path, monkeypatch):
     assert row2["status"] == "active"
 
     db.conn.close()
+
+
+def test_groups_10_item_pagination(tmp_path, monkeypatch):
+    from aiogram.types import Update, CallbackQuery, User, Message, Chat
+    from aiogram.methods import EditMessageText
+    from gfs.app import create_app
+
+    db_file = tmp_path / "test_pagination.sqlite3"
+    monkeypatch.setenv("DB_PATH", str(db_file))
+    monkeypatch.setenv("ADMIN_IDS", "7")
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    app = create_app()
+    db = app.state.db
+    dp = app.state.dp
+
+    # Insert 25 groups to test 10-item pagination
+    for i in range(1, 26):
+        db.execute(f"INSERT INTO groups(id, title, photo, present, status) VALUES({-1000 - i}, 'Group #{i}', 1, 1, 'active')")
+
+    bot = AsyncMock()
+    msg_box = Message(message_id=800, date=datetime.now(), chat=Chat(id=7, type="private"))
+
+    # 1. Open groups view (page 0)
+    q_p0 = CallbackQuery(
+        id="cb_p0",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_p",
+        message=msg_box,
+        data="adm:groups"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=801, callback_query=q_p0)))
+
+    edit_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert edit_calls
+    markup0 = edit_calls[-1].reply_markup
+
+    # Count group buttons on page 0: exactly 10!
+    grp_cbs0 = [btn.callback_data for row in markup0.inline_keyboard for btn in row if btn.callback_data and btn.callback_data.startswith("adm:grp_detail:")]
+    assert len(grp_cbs0) == 10
+
+    # Verify pagination buttons
+    nav_cbs0 = [btn.callback_data for row in markup0.inline_keyboard for btn in row if btn.callback_data]
+    assert "adm:groups_page:all:1" in nav_cbs0
+    assert any("1/3 (10 tadan)" in btn.text for row in markup0.inline_keyboard for btn in row)
+
+    # 2. Go to page 1
+    bot.reset_mock()
+    q_p1 = CallbackQuery(
+        id="cb_p1",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_p",
+        message=msg_box,
+        data="adm:groups_page:all:1"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=802, callback_query=q_p1)))
+
+    edit_calls2 = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert edit_calls2
+    markup1 = edit_calls2[-1].reply_markup
+
+    grp_cbs1 = [btn.callback_data for row in markup1.inline_keyboard for btn in row if btn.callback_data and btn.callback_data.startswith("adm:grp_detail:")]
+    assert len(grp_cbs1) == 10
+
+    nav_cbs1 = [btn.callback_data for row in markup1.inline_keyboard for btn in row if btn.callback_data]
+    assert "adm:groups_page:all:0" in nav_cbs1  # Previous
+    assert "adm:groups_page:all:2" in nav_cbs1  # Next
+    assert any("2/3 (10 tadan)" in btn.text for row in markup1.inline_keyboard for btn in row)
+
+    db.conn.close()

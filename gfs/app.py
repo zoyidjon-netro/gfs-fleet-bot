@@ -537,8 +537,8 @@ def create_app():
             if not present_groups:
                 lines.append(t("groups_no_active", lang))
 
-        # Pagination: 8 groups per page
-        PAGE_SIZE = 8
+        # Pagination: 10 groups per page
+        PAGE_SIZE = 10
         total_pages = max(1, (len(target_list) + PAGE_SIZE - 1) // PAGE_SIZE)
         page = max(0, min(page, total_pages - 1))
         start_idx = page * PAGE_SIZE
@@ -562,7 +562,7 @@ def create_app():
             nav_row = []
             if page > 0:
                 nav_row.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"adm:groups_page:{filter_mode}:{page - 1}"))
-            nav_row.append(InlineKeyboardButton(text=f"📄 {page + 1}/{total_pages}", callback_data="adm:noop"))
+            nav_row.append(InlineKeyboardButton(text=f"📄 {page + 1}/{total_pages} (10 tadan)", callback_data="adm:noop"))
             if page < total_pages - 1:
                 nav_row.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"adm:groups_page:{filter_mode}:{page + 1}"))
             rows.append(nav_row)
