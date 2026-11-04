@@ -755,3 +755,101 @@ def test_admin_inline_buttons_show_username_and_categories(tmp_path, monkeypatch
     assert "Faqat faol emas" in edit_calls3[-1].text
 
     db.conn.close()
+
+
+def test_quick_broadcast_panel_and_instant_dispatch(tmp_path, monkeypatch):
+    import json
+    from aiogram.types import Update, CallbackQuery, User, Message, Chat
+    from aiogram.methods import SendMessage, EditMessageText
+    from gfs.app import create_app
+
+    db_file = tmp_path / "test_quick_bcast.sqlite3"
+    monkeypatch.setenv("DB_PATH", str(db_file))
+    monkeypatch.setenv("ADMIN_IDS", "7")
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    app = create_app()
+    db = app.state.db
+    dp = app.state.dp
+
+    # Insert groups
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-10, 'Alpha Active', 1, 1, 'active')")
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-20, 'Beta Inactive', 0, 1, 'inactive')")
+
+    bot = AsyncMock()
+
+    # 1. Admin sends an announcement text directly to the bot
+    incoming_msg = Message(
+        message_id=501,
+        date=datetime.now(),
+        chat=Chat(id=7, type="private"),
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        text="Diqqat barcha haydovchilar: sovuq tushmoqda!"
+    ).as_(bot)
+
+    asyncio.run(dp.feed_update(bot, Update(update_id=501, message=incoming_msg)))
+
+    # Verify a draft job was created in DB
+    jobs = db.rows("SELECT * FROM jobs ORDER BY id DESC")
+    assert len(jobs) >= 1
+    draft_job = jobs[0]
+    draft_payload = json.loads(draft_job["payload"])
+    assert draft_payload["text"] == "Diqqat barcha haydovchilar: sovuq tushmoqda!"
+
+    # Verify the bot replied with the quick broadcast panel
+    send_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], SendMessage)]
+    assert send_calls
+    panel_msg = send_calls[-1]
+    assert "Xabar tarqatishga tayyor!" in panel_msg.text
+    callbacks = [btn.callback_data for row in panel_msg.reply_markup.inline_keyboard for btn in row]
+    assert f"adm:qb_recip:{draft_job['id']}:active" in callbacks
+    assert f"adm:qb_recip:{draft_job['id']}:inactive" in callbacks
+    assert f"adm:qb_recip:{draft_job['id']}:all" in callbacks
+    assert f"adm:qb_time:{draft_job['id']}:now" in callbacks
+    assert f"adm:send_now:{draft_job['id']}" in callbacks
+
+    # 2. Admin switches recipients to inactive groups
+    bot.reset_mock()
+    msg_box = Message(message_id=502, date=datetime.now(), chat=Chat(id=7, type="private"))
+    q_switch_inact = CallbackQuery(
+        id="cb_switch",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_sw",
+        message=msg_box,
+        data=f"adm:qb_recip:{draft_job['id']}:inactive"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=502, callback_query=q_switch_inact)))
+
+    updated_job = db.rows("SELECT * FROM jobs WHERE id=?", (draft_job['id'],))[0]
+    updated_payload = json.loads(updated_job["payload"])
+    assert updated_payload["recipients"] == [-20]
+
+    # 3. Admin switches to +15m
+    bot.reset_mock()
+    q_switch_time = CallbackQuery(
+        id="cb_time",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_time",
+        message=msg_box,
+        data=f"adm:qb_time:{draft_job['id']}:15m"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=503, callback_query=q_switch_time)))
+
+    time_job = db.rows("SELECT * FROM jobs WHERE id=?", (draft_job['id'],))[0]
+    assert time_job["due"] > time.time() + 600
+
+    # 4. Admin switches back to now and sends
+    db.execute("UPDATE jobs SET due=? WHERE id=?", (time.time(), draft_job['id']))
+    bot.reset_mock()
+    q_send = CallbackQuery(
+        id="cb_send",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_send",
+        message=msg_box,
+        data=f"adm:send_now:{draft_job['id']}"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=504, callback_query=q_send)))
+
+    sent_job = db.rows("SELECT * FROM jobs WHERE id=?", (draft_job['id'],))[0]
+    assert sent_job["state"] in ("running", "done")
+
+    db.conn.close()

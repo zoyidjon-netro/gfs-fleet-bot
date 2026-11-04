@@ -18,7 +18,28 @@ html{background:var(--bg)}button{background:var(--button);color:var(--on-button)
 <div id="status" role="status"></div>
 <section id="dashboard"><div class="section-number">OVERVIEW</div><h2>Dashboard</h2><p class="section-caption" id="today"></p><div class="metrics" id="metrics"><div class="skeleton"></div><div class="skeleton"></div></div><h2 style="margin-top:24px">Tezkor amallar</h2><p class="section-caption">Kerakli bo‘limga o‘ting.</p><div class="quick-actions"><button data-go="compose-section">+ Yangi tarqatma</button><button data-go="compose-section" class="secondary">◷ Xabar rejalash</button><button data-go="groups-section" class="secondary">◎ Guruhlarni ko‘rish</button><button data-go="audits" class="secondary">▤ COI tekshiruvi</button></div><h2 style="margin-top:24px">So‘nggi faoliyat</h2><div id="activity" class="empty">Yuklanmoqda…</div></section><section id="compose-section" hidden><div class="section-number">01 / XABAR</div><h2 id="formTitle">Yangi tarqatma</h2><p class="section-caption">Xabaringiz va yuborish tartibini sozlang.</p><form id="compose">
 <div class="row"><div><label>Xabar turi</label><select id="kind"><option value="text">Matn</option><option value="photo">Rasm</option><option value="video">Video</option><option value="document">Hujjat</option><option value="sticker">Stiker (premium ham)</option><option value="animation">GIF / animatsiya</option><option value="audio">Audio</option><option value="voice">Ovozli xabar</option><option value="video_note">Video doira</option><option value="copy">Telegram xabardan nusxa</option></select></div><div><label>Format</label><select id="parse_mode"><option value="">Oddiy matn</option><option>HTML</option><option>MarkdownV2</option></select></div></div>
-<div class="compose-step">01 · Xabar</div><label for="text">Matn / media izohi</label><textarea id="text" placeholder="Xabaringizni yozing…"></textarea><div class="formatbar" aria-label="Matn formatlash"><button type="button" data-format="b" aria-label="Qalin"><b>B</b></button><button type="button" data-format="i" aria-label="Kursiv"><i>I</i></button><button type="button" data-format="code" aria-label="Monospace">&lt;/&gt;</button><button type="button" data-format="tg-spoiler" aria-label="Yashirin matn">◧</button></div><div class="count" id="charCount">0 / 4096</div><div class="message-preview-label">Telegram’da ko‘rinishi · matn ko‘rinishi</div><div class="preview" aria-label="Xabar ko‘rinishi"><div class="bubble" id="messagePreview">Xabar ko‘rinishi shu yerda paydo bo‘ladi</div><div class="preview-buttons" id="previewButtons"></div></div>
+<div class="compose-step">01 · Xabar</div>
+<div style="margin: 6px 0 10px 0;">
+  <span style="font-size:12px;font-weight:600;color:var(--muted,#94a3b8);display:block;margin-bottom:6px;">⚡ Tayyor shablonlar (bir bosishda kiritish):</span>
+  <div style="display:flex;flex-wrap:wrap;gap:6px;">
+    <button type="button" class="secondary" style="font-size:11px;padding:4px 8px;border-radius:6px;" onclick="applyTemplate('alert')">🚨 Shoshilinch</button>
+    <button type="button" class="secondary" style="font-size:11px;padding:4px 8px;border-radius:6px;" onclick="applyTemplate('weather')">❄️ Noqulay ob-havo</button>
+    <button type="button" class="secondary" style="font-size:11px;padding:4px 8px;border-radius:6px;" onclick="applyTemplate('safety')">🛡 Safety & Inspeksiya</button>
+    <button type="button" class="secondary" style="font-size:11px;padding:4px 8px;border-radius:6px;" onclick="applyTemplate('fuel')">⛽ Yoqilg'i & Marshrut</button>
+    <button type="button" class="secondary" style="font-size:11px;padding:4px 8px;border-radius:6px;" onclick="applyTemplate('weekend')">⏰ Dam olish eslatmasi</button>
+  </div>
+</div>
+<label for="text">Matn / media izohi</label>
+<textarea id="text" placeholder="Xabaringizni yozing…"></textarea><div class="formatbar" aria-label="Matn formatlash"><button type="button" data-format="b" aria-label="Qalin"><b>B</b></button><button type="button" data-format="i" aria-label="Kursiv"><i>I</i></button><button type="button" data-format="code" aria-label="Monospace">&lt;/&gt;</button><button type="button" data-format="tg-spoiler" aria-label="Yashirin matn">◧</button></div><div class="count" id="charCount">0 / 4096</div><div class="message-preview-label">Telegram’da ko‘rinishi · matn ko‘rinishi</div>
+<div class="preview" aria-label="Xabar ko‘rinishi"><div class="bubble" id="messagePreview">Xabar ko‘rinishi shu yerda paydo bo‘ladi</div><div class="preview-buttons" id="previewButtons"></div></div>
+
+<div style="margin:16px 0;padding:12px 14px;border-radius:10px;background:var(--soft,#1e293b);border:1px dashed var(--button,#3b82f6);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+  <div>
+    <strong style="color:var(--text,#f8fafc);">⚡ Tezkor tarqatish (1-bosishda)</strong>
+    <div style="font-size:12px;color:var(--muted,#94a3b8);margin-top:2px;">Boshqa qadamlarni bosib o‘tirmasdan, hozirning o‘zida barcha faol guruhlarga yuborish</div>
+  </div>
+  <button type="button" id="expressSendBtn" style="background:#16a34a;color:#fff;font-weight:600;padding:10px 18px;border-radius:8px;border:none;cursor:pointer;font-size:14px;box-shadow:0 2px 4px rgba(0,0,0,0.2);">🚀 Faol guruhlarga hozir yuborish</button>
+</div>
 <div class="compose-step">02 · Media va tugmalar</div><details><summary>Media yoki manba xabar</summary><label>Fayl biriktirish (20 MB gacha)</label><input type="file" id="upload"><button type="button" id="uploadBtn" class="secondary">Faylni yuklash</button><small>Yuklangan fayl shaxsiy chatingizda ham ko‘rinadi. Stikerni botga yuborib file_id olish ham mumkin.</small><label>Telegram file_id</label><input id="file_id"><div class="row"><div><label>source_chat</label><input id="source_chat" type="number"></div><div><label>source_message</label><input id="source_message" type="number"></div></div><small>Botdagi xabarga /source buyrug‘i bilan reply qilib manba raqamlarini oling.</small></details>
 <details><summary>Inline tugmalar</summary><p class="muted">Havola yoki tasdiqlash tugmalarini qo‘shing. Har bir tugma alohida qatorda chiqadi.</p><div id="buttonRows"></div><button type="button" id="addButton" class="secondary">+ Tugma qo‘shish</button></details>
 <div class="compose-step">03 · Yuborish vaqti</div><label>Yuborish vaqti</label><select id="schedule"><option value="now">Hozir</option><option value="once">Belgilangan vaqtda</option><option value="weekly">Har hafta</option></select>
@@ -868,5 +889,72 @@ if ($('langSelect')) {
 applyUILang(currentLang);
 
 setStep(0);run(load);
+
+
+const TEMPLATES = {
+    alert: "🚨 DIQQAT! SHOSHILINCH E'LON\n\nHurmatli haydovchilar!\n\n[Xabar tafsilotini shu yerga yozing]\n\nBarcha xodimlar e'tiborli bo'lishlari so'raladi.\n\n— GFS Safety Department",
+    weather: "❄️ NOQULAY OB-HAVO OGOHLANTIRISHI\n\nYo'llarda muzlama, kuchli qor va ko'rish masofasining pasayishi kutilmoqda.\n\n• Tezlikni me'yordan oshirmang\n• Xavfsiz masofa saqlang\n• Tormoz tizimi va shinalarni tekshiring\n\nYo'lingiz bexatar bo'lsin!\n— GFS Fleet Team",
+    safety: "🛡 XAVFSIZLIK VA PRE-TRIP INSPEKSIYA\n\nHurmatli haydovchilar!\n\nReysga chiqishdan oldin Pre-Trip tekshiruvini to'liq o'tkazing:\n1. Tormoz va chiroqlar\n2. Shinalar bosimi va holati\n3. Suyuqliklar sathi (moy, antifriz)\n4. Logbook holatini tekshirish\n\nXavfsizlik birinchi o'rinda!\n— GFS Safety",
+    fuel: "⛽ YOQILG'I VA MARSHRUT ESLATMASI\n\nHurmatli haydovchilar!\nYoqilg'ini faqat tasdiqlangan Fuel Stop shoxobchalaridan olishingizni so'raymiz.\n\nCheklarni o'z vaqtida taqdim eting.\n— GFS Dispatch",
+    weekend: "⏰ DAM OLISH VA NAVBATCHILIK ESLATMASI\n\nDam olish kunlaridagi favqulodda vaziyatlar bo'yicha navbatchi dispetcher bilan bog'laning.\n\nBarchaga xayrli va xavfsiz dam olish tilaymiz!\n— GFS Management"
+};
+
+function applyTemplate(key){
+    if(TEMPLATES[key]){
+        $('text').value = TEMPLATES[key];
+        updatePreview();
+        notice("Shablon kiritildi!");
+    }
+}
+
+// Auto-save draft on input
+$('text').addEventListener('input', ()=>{
+    try {
+        localStorage.setItem('gfs_msg_draft', $('text').value);
+    } catch(e){}
+});
+
+// Restore draft on startup if text is empty
+window.addEventListener('DOMContentLoaded', ()=>{
+    try {
+        const saved = localStorage.getItem('gfs_msg_draft');
+        if(saved && !$('text').value){
+            $('text').value = saved;
+            updatePreview();
+        }
+    } catch(e){}
+});
+
+// Express Send 1-Click
+document.getElementById('expressSendBtn')?.addEventListener('click', ()=>{
+    run(async ()=>{
+        const txt = $('text').value.trim();
+        const fileId = $('file_id')?.value?.trim();
+        if(!txt && !fileId){
+            notice("Iltimos, xabar matnini kiriting!");
+            $('text').focus();
+            return;
+        }
+        const actCount = groups.filter(g=>g.present&&isGroupActive(g)).length;
+        if(!confirm(`📢 Xabar barcha faol guruhlarga (${actCount} ta) darhol tarqatilsinmi?`)){
+            return;
+        }
+        const p = payload();
+        p.recipients = null; // Broadcast to all active
+        p.due = Date.now() / 1000;
+        await api(editing ? 'jobs/' + editing : 'jobs', editing ? 'PUT' : 'POST', p);
+        notice("🚀 Xabar barcha faol guruhlarga yuborilmoqda!");
+        reset();
+        try { localStorage.removeItem('gfs_msg_draft'); } catch(e){}
+        await load();
+        showScreen('jobs-section');
+    });
+});
+
+// Make progress steps directly clickable!
+document.querySelectorAll('.steps button').forEach((btn, idx)=>{
+    btn.style.cursor = 'pointer';
+    btn.onclick = ()=>setStep(idx);
+});
 
 </script></body></html>

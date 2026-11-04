@@ -631,20 +631,171 @@ def create_app():
         ])
         return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
+    def build_quick_broadcast_panel(job_id: int, lang: str = "uz"):
+        rows = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if not rows:
+            return "⚠️ Vazifa topilmadi.", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("btn_main", lang), callback_data="adm:main")]])
+        job = rows[0]
+        try:
+            payload = json.loads(job["payload"]) if isinstance(job.get("payload"), str) else (job.get("payload") or {})
+        except Exception:
+            payload = {}
+        kind = payload.get("kind", "text")
+        text_content = payload.get("text") or ""
+        recipients = payload.get("recipients")
+        due = job.get("due", 0)
+
+        groups = db.groups()
+        present_groups = [g for g in groups if g.get("present")]
+        active_groups = [g for g in present_groups if (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))]
+        inactive_groups = [g for g in present_groups if g not in active_groups]
+
+        active_count = len(active_groups)
+        inactive_count = len(inactive_groups)
+        total_count = len(present_groups)
+
+        # Determine current recipient mode
+        if recipients is None:
+            recip_mode = "active"
+            recip_label = f"🟢 Faol ({active_count} ta)"
+            target_count = active_count
+        elif isinstance(recipients, list) and inactive_groups and set(recipients) == {g["id"] for g in inactive_groups}:
+            recip_mode = "inactive"
+            recip_label = f"⏸ Faol emas ({inactive_count} ta)"
+            target_count = inactive_count
+        elif isinstance(recipients, list) and len(recipients) == total_count:
+            recip_mode = "all"
+            recip_label = f"✨ Hammasi ({total_count} ta)"
+            target_count = total_count
+        else:
+            recip_mode = "custom"
+            cnt = len(recipients) if isinstance(recipients, list) else active_count
+            recip_label = f"👥 Tanlangan ({cnt} ta)"
+            target_count = cnt
+
+        # Determine timing
+        now = time.time()
+        diff = due - now
+        if diff <= 60:
+            time_mode = "now"
+            time_label = "⚡ Darhol (Hozir)"
+        elif 60 < diff <= 1200:
+            time_mode = "15m"
+            time_label = "⏰ 15 daqiqadan keyin"
+        elif 1200 < diff <= 4200:
+            time_mode = "1h"
+            time_label = "⏰ 1 soatdan keyin"
+        else:
+            time_mode = "custom"
+            tz_str = os.getenv("TIMEZONE", "Asia/Tashkent")
+            try:
+                dt = datetime.fromtimestamp(due, tz=timezone.utc).astimezone(ZoneInfo(tz_str)).strftime("%d.%m.%Y %H:%M")
+            except Exception:
+                dt = str(int(due))
+            time_label = f"⏰ {dt}"
+
+        kind_icons = {
+            "text": "📝 Matn",
+            "photo": "🖼 Rasm",
+            "video": "🎬 Video",
+            "document": "📄 Hujjat",
+            "voice": "🎤 Ovozli",
+            "audio": "🎵 Audio",
+            "animation": "🎞 GIF",
+            "copy": "📋 Xabar nusxasi"
+        }
+        k_icon = kind_icons.get(kind, f"📦 {kind}")
+        snippet = (text_content[:140] + "…") if len(text_content) > 140 else (text_content or "_(Biriktirilgan media)_")
+
+        lines = [
+            "📢 *Xabar tarqatishga tayyor!*\n",
+            f"• *Turi:* {k_icon}",
+            f"• *Xabar:* {snippet}",
+            f"• *Qabul qiluvchilar:* *{recip_label}*",
+            f"• *Yuborish vaqti:* *{time_label}*\n",
+            "👇 _Qabul qiluvchilarni tanlang:_"
+        ]
+
+        kb = []
+        # Recipient toggle buttons
+        b_act = f"🟢 Faol ({active_count})" + (" ✓" if recip_mode == "active" else "")
+        b_inact = f"⏸ Faol emas ({inactive_count})" + (" ✓" if recip_mode == "inactive" else "")
+        b_all = f"✨ Hammasi ({total_count})" + (" ✓" if recip_mode == "all" else "")
+        kb.append([
+            InlineKeyboardButton(text=b_act, callback_data=f"adm:qb_recip:{job_id}:active"),
+            InlineKeyboardButton(text=b_inact, callback_data=f"adm:qb_recip:{job_id}:inactive"),
+            InlineKeyboardButton(text=b_all, callback_data=f"adm:qb_recip:{job_id}:all")
+        ])
+
+        # Timing toggle buttons
+        t_now = "⚡ Darhol" + (" ✓" if time_mode == "now" else "")
+        t_15m = "⏰ +15 daq" + (" ✓" if time_mode == "15m" else "")
+        t_1h = "⏰ +1 soat" + (" ✓" if time_mode == "1h" else "")
+        kb.append([
+            InlineKeyboardButton(text=t_now, callback_data=f"adm:qb_time:{job_id}:now"),
+            InlineKeyboardButton(text=t_15m, callback_data=f"adm:qb_time:{job_id}:15m"),
+            InlineKeyboardButton(text=t_1h, callback_data=f"adm:qb_time:{job_id}:1h")
+        ])
+
+        # Main SEND button
+        kb.append([
+            InlineKeyboardButton(text=f"🚀 XABARNI TARQATISH ({target_count} ta guruhga)", callback_data=f"adm:send_now:{job_id}")
+        ])
+
+        # Sub row
+        webapp_url = os.getenv("WEBAPP_URL", "")
+        sub_row = []
+        if webapp_url.startswith("https://"):
+            sub_row.append(InlineKeyboardButton(text="📱 Mini App", web_app=WebAppInfo(url=webapp_url)))
+        sub_row.append(InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"adm:cancel:{job_id}"))
+        kb.append(sub_row)
+
+        return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=kb)
+
+    async def create_job_from_message(msg: Message, user_id: int) -> int:
+        if msg.text:
+            payload = {"kind": "text", "text": msg.text, "recipients": None}
+        elif msg.photo:
+            payload = {"kind": "photo", "file_id": msg.photo[-1].file_id, "text": msg.caption or "", "recipients": None}
+        elif msg.video:
+            payload = {"kind": "video", "file_id": msg.video.file_id, "text": msg.caption or "", "recipients": None}
+        elif msg.document:
+            payload = {"kind": "document", "file_id": msg.document.file_id, "text": msg.caption or "", "recipients": None}
+        elif msg.voice:
+            payload = {"kind": "voice", "file_id": msg.voice.file_id, "text": msg.caption or "", "recipients": None}
+        elif msg.audio:
+            payload = {"kind": "audio", "file_id": msg.audio.file_id, "text": msg.caption or "", "recipients": None}
+        elif msg.animation:
+            payload = {"kind": "animation", "file_id": msg.animation.file_id, "text": msg.caption or "", "recipients": None}
+        else:
+            payload = {"kind": "copy", "source_chat": msg.chat.id, "source_message": msg.message_id, "recipients": None}
+
+        cursor = db.execute(
+            "INSERT INTO jobs(owner, payload, due, state) VALUES(?, ?, ?, 'pending')",
+            (user_id, json.dumps(payload), time.time())
+        )
+        return cursor.lastrowid
+
     def build_broadcast_info_view(lang="uz"):
         groups = db.groups()
         present = [g for g in groups if g.get("present")]
-        eligible_groups = [g for g in present if eligible(g.get("title", ""), bool(g.get("photo")))]
+        active_groups = [g for g in present if (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))]
+        inactive_groups = [g for g in present if g not in active_groups]
 
         text = (
-            t("broadcast_info_title", lang) + "\n\n" +
-            t("broadcast_info_stats", lang, total=len(present), eligible=len(eligible_groups)) + "\n\n" +
-            t("broadcast_info_desc", lang)
+            "📢 *Tezkor xabar tarqatish bo'limi*\n\n"
+            f"📊 *Guruhlar:* Jami {len(present)} ta (🟢 Faol: {len(active_groups)} | ⏸ Faol emas: {len(inactive_groups)})\n\n"
+            "💡 *Eng oson usul:*\n"
+            "Shunchaki bot chatiga istalgan matn yozing, rasm/video yuboring yoki boshqa kanaldan forward qiling — bot darhol 1 bosishda yuborish panelini chiqaradi!\n\n"
+            "Yoki quyidagi tugmalardan birini tanlang:"
         )
         rows = []
+        rows.append([
+            InlineKeyboardButton(text="✍️ Yangi xabar yozish", callback_data="adm:prompt_broadcast")
+        ])
         webapp_url = os.getenv("WEBAPP_URL", "")
         if webapp_url.startswith("https://"):
-            rows.append([InlineKeyboardButton(text=t("btn_new_broadcast", lang), web_app=WebAppInfo(url=webapp_url))])
+            rows.append([InlineKeyboardButton(text="📱 Mini App orqali yuborish", web_app=WebAppInfo(url=webapp_url))])
         rows.append([
             InlineKeyboardButton(text=t("btn_groups_status", lang), callback_data="adm:groups"),
             InlineKeyboardButton(text=t("btn_jobs_list", lang), callback_data="adm:jobs"),
@@ -902,41 +1053,34 @@ def create_app():
             return
         await check_coi(message, document)
 
-    @dp.message(Command("broadcast", "tarqatish"))
+    @dp.message(Command("broadcast", "tarqatish", "send", "xabar"))
     async def broadcast_command(message: Message):
         if not await known_user(message):
             return
-        arg = (message.text or "").split(maxsplit=1)
-        if len(arg) < 2 or not arg[1].strip():
-            await message.answer(
-                "ℹ️ *Xabar tarqatish buyrug'i:*\n\n"
-                "`/broadcast Xabar matni`\n\n"
-                "• *Barcha guruhlarga* tezkor matn yuborish uchun xabarni kiriting.\n"
-                "• *Guruhlarni tanlab* va *vaqt zonasi (Asia / USA)* bo'yicha rejalash uchun Mini App'dan foydalaning.",
-                parse_mode="Markdown"
-            )
-            return
-        text_to_send = arg[1].strip()
-        groups = db.groups()
-        eligible_groups = [g for g in groups if g.get("present") and eligible(g.get("title", ""), bool(g.get("photo")))]
-        if not eligible_groups:
-            await message.answer("⚠️ Botda xabar yuborish uchun faol guruhlar mavjud emas.")
+        target_msg = message.reply_to_message
+        if target_msg:
+            job_id = await create_job_from_message(target_msg, message.from_user.id)
+            text, markup = build_quick_broadcast_panel(job_id)
+            await message.reply(text, reply_markup=markup, parse_mode="Markdown")
             return
 
-        cursor = db.execute("INSERT INTO jobs(owner,payload,due,state) VALUES(?,?,?,'pending')",
-                            (message.from_user.id, json.dumps({"kind": "text", "text": text_to_send, "recipients": None}), time.time()))
-        job_id = cursor.lastrowid
-        confirm_markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"✅ Ha, barchasiga yuborilsin ({len(eligible_groups)} ta)", callback_data=f"adm:send_now:{job_id}")],
-            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"adm:cancel:{job_id}")]
-        ])
+        arg = (message.text or "").split(maxsplit=1)
+        if len(arg) > 1 and arg[1].strip():
+            text_to_send = arg[1].strip()
+            cursor = db.execute(
+                "INSERT INTO jobs(owner,payload,due,state) VALUES(?,?,?,'pending')",
+                (message.from_user.id, json.dumps({"kind": "text", "text": text_to_send, "recipients": None}), time.time())
+            )
+            job_id = cursor.lastrowid
+            text, markup = build_quick_broadcast_panel(job_id)
+            await message.reply(text, reply_markup=markup, parse_mode="Markdown")
+            return
+
         await message.answer(
-            f"⚠️ *Tarqatmani tasdiqlang:*\n\n"
-            f"📢 *Qabul qiluvchilar:* Barcha faol guruhlar ({len(eligible_groups)} ta)\n"
-            f"📝 *Xabar matni:*\n{text_to_send}\n\n"
-            "_Darhol yuborilsinmi?_",
-            reply_markup=confirm_markup,
-            parse_mode="Markdown"
+            "✍️ *Xabar matnini yozing yoki rasm/video/forward yuboring:*\n\n"
+            "Bot avtomatik ravishda uni barcha guruhlarga tarqatish panelini chiqarib beradi.",
+            parse_mode="Markdown",
+            reply_markup=ForceReply(selective=True)
         )
 
     @dp.message(Command("source"))
@@ -1009,22 +1153,12 @@ def create_app():
             return
         if message.document and (message.document.file_name or "").lower().endswith(".pdf"):
             await check_coi(message, message.document)
-        for kind in KINDS - {"text", "copy"}:
-            media = getattr(message, kind, None)
-            if media:
-                file_id = media[-1].file_id if kind == "photo" else media.file_id
-                db.execute("INSERT OR REPLACE INTO media VALUES(?,?,?)", (file_id, message.from_user.id, kind))
-                webapp_url = os.getenv("WEBAPP_URL", "")
-                rows = []
-                if webapp_url.startswith("https://"):
-                    rows.append([InlineKeyboardButton(text="📱 Mini Appda tarqatish", web_app=WebAppInfo(url=webapp_url))])
-                rows.append([InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")])
-                await message.answer(
-                    f"📎 *Media saqlandi!*\n\n• Turi: `{kind}`\n• `file_id`: `{file_id}`\n\n_Bu file_id'dan Mini App orqali tarqatishda foydalanishingiz mumkin._",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-                    parse_mode="Markdown"
-                )
-                break
+            return
+
+        # Any message from admin in private chat automatically triggers quick broadcast panel!
+        job_id = await create_job_from_message(message, message.from_user.id)
+        text, markup = build_quick_broadcast_panel(job_id)
+        await message.reply(text, reply_markup=markup, parse_mode="Markdown")
 
     @dp.callback_query()
     async def callback(query):
@@ -1238,16 +1372,91 @@ def create_app():
                     await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
                 return
 
+            if data == "adm:prompt_broadcast":
+                await query.answer()
+                await query.message.answer(
+                    "✍️ *Xabar matnini yozing yoki rasm/video/forward yuboring:*\n\n"
+                    "Bot uni guruhlarga tarqatish uchun 1 bosishda tayyorlaydi.",
+                    parse_mode="Markdown",
+                    reply_markup=ForceReply(selective=True)
+                )
+                return
+
+            if data.startswith("adm:qb_recip:"):
+                parts = data.split(":")
+                job_id = int(parts[2])
+                mode = parts[3]
+                rows = db.rows("SELECT * FROM jobs WHERE id=?", (job_id,))
+                if rows:
+                    job = rows[0]
+                    payload = json.loads(job["payload"]) if isinstance(job.get("payload"), str) else (job.get("payload") or {})
+                    groups = db.groups()
+                    present_groups = [g for g in groups if g.get("present")]
+                    active_groups = [g for g in present_groups if (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))]
+                    inactive_groups = [g for g in present_groups if g not in active_groups]
+                    if mode == "active":
+                        payload["recipients"] = None
+                    elif mode == "inactive":
+                        payload["recipients"] = [g["id"] for g in inactive_groups]
+                    elif mode == "all":
+                        payload["recipients"] = [g["id"] for g in present_groups]
+                    db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(payload), job_id))
+                    await query.answer()
+                    text, markup = build_quick_broadcast_panel(job_id, lang)
+                    with contextlib.suppress(Exception):
+                        await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:qb_time:"):
+                parts = data.split(":")
+                job_id = int(parts[2])
+                tmode = parts[3]
+                now = time.time()
+                if tmode == "now":
+                    due = now
+                elif tmode == "15m":
+                    due = now + 15 * 60
+                elif tmode == "1h":
+                    due = now + 60 * 60
+                else:
+                    due = now
+                db.execute("UPDATE jobs SET due=? WHERE id=?", (due, job_id))
+                await query.answer()
+                text, markup = build_quick_broadcast_panel(job_id, lang)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
             if data.startswith("adm:send_now:"):
                 job_id = int(data.split(":")[-1])
                 row = db.rows("SELECT * FROM jobs WHERE id=? AND state='pending'", (job_id,))
                 if not row:
                     await query.answer("Vazifa topilmadi yoki allaqachon bajarilgan", show_alert=True)
                     return
+                job = row[0]
+                now = time.time()
+                if job["due"] > now + 60:
+                    tz_str = os.getenv("TIMEZONE", "Asia/Tashkent")
+                    try:
+                        dt = datetime.fromtimestamp(job["due"], tz=timezone.utc).astimezone(ZoneInfo(tz_str)).strftime("%d.%m.%Y %H:%M")
+                    except Exception:
+                        dt = str(int(job["due"]))
+                    await query.answer("⏰ Xabar rejalashtirildi!", show_alert=True)
+                    with contextlib.suppress(Exception):
+                        await query.message.edit_text(
+                            f"⏰ *#{job_id} vazifa rejalashtirildi!*\n\n• Belgilangan vaqt: `{dt}`\n• Belgilangan vaqtda xabar avtomatik tarqatiladi.\n\nNatijalarni `⏰ Rejalar` bo'limida kuzatishingiz mumkin.",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                                [InlineKeyboardButton(text="⏰ Rejalar ro'yxati", callback_data="adm:jobs")],
+                                [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="adm:main")]
+                            ]),
+                            parse_mode="Markdown"
+                        )
+                    return
+
                 await query.answer("🚀 Xabar yuborilmoqda...", show_alert=False)
                 db.execute("UPDATE jobs SET state='running' WHERE id=?", (job_id,))
                 active_bot = bot or query.bot
-                asyncio.create_task(execute_job(active_bot, db, row[0]))
+                asyncio.create_task(execute_job(active_bot, db, job))
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(
                         f"🚀 *#{job_id} tarqatish boshlandi!*\n\nNatijalarni `⏰ Rejalar` bo'limida kuzatishingiz mumkin.",
