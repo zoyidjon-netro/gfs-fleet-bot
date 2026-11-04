@@ -998,3 +998,89 @@ def test_scheduled_post_creation_list_and_timezone_button_configuration(tmp_path
     assert due_dt3.minute == 30
 
     db.conn.close()
+
+
+def test_bot_group_status_management_and_detail_view(tmp_path, monkeypatch):
+    from aiogram.types import Update, CallbackQuery, User, Message, Chat
+    from aiogram.methods import EditMessageText
+    from gfs.app import create_app
+
+    db_file = tmp_path / "test_bot_groups.sqlite3"
+    monkeypatch.setenv("DB_PATH", str(db_file))
+    monkeypatch.setenv("ADMIN_IDS", "7")
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    app = create_app()
+    db = app.state.db
+    dp = app.state.dp
+
+    # Insert two groups
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-1001, 'Fleet Alpha', 1, 1, 'active')")
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-1002, 'Fleet Beta', 0, 1, 'inactive')")
+
+    bot = AsyncMock()
+    msg_box = Message(message_id=700, date=datetime.now(), chat=Chat(id=7, type="private"))
+
+    # 1. Admin opens groups list in bot
+    q_groups = CallbackQuery(
+        id="cb_groups_view",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_grp",
+        message=msg_box,
+        data="adm:groups"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=701, callback_query=q_groups)))
+
+    edit_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert edit_calls
+    last_markup = edit_calls[-1].reply_markup
+    callbacks = [btn.callback_data for row in last_markup.inline_keyboard for btn in row]
+    assert "adm:grp_detail:-1001" in callbacks
+    assert "adm:grp_detail:-1002" in callbacks
+
+    # 2. Admin clicks on group -1001 to view settings
+    bot.reset_mock()
+    q_detail = CallbackQuery(
+        id="cb_detail",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_det",
+        message=msg_box,
+        data="adm:grp_detail:-1001"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=702, callback_query=q_detail)))
+
+    edit_calls2 = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert edit_calls2
+    detail_markup = edit_calls2[-1].reply_markup
+    det_cbs = [btn.callback_data for row in detail_markup.inline_keyboard for btn in row]
+    assert "adm:grp_set_status:-1001:active" in det_cbs
+    assert "adm:grp_set_status:-1001:inactive" in det_cbs
+
+    # 3. Admin clicks [⏸ Faol emas qilish]
+    bot.reset_mock()
+    q_set_inact = CallbackQuery(
+        id="cb_set_inact",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_inact",
+        message=msg_box,
+        data="adm:grp_set_status:-1001:inactive"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=703, callback_query=q_set_inact)))
+
+    row = db.rows("SELECT status FROM groups WHERE id=-1001")[0]
+    assert row["status"] == "inactive"
+
+    # 4. Admin clicks [🟢 Faol qilish]
+    bot.reset_mock()
+    q_set_act = CallbackQuery(
+        id="cb_set_act",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_act",
+        message=msg_box,
+        data="adm:grp_set_status:-1001:active"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=704, callback_query=q_set_act)))
+
+    row2 = db.rows("SELECT status FROM groups WHERE id=-1001")[0]
+    assert row2["status"] == "active"
+
+    db.conn.close()

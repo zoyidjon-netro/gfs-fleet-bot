@@ -459,7 +459,50 @@ def create_app():
             [InlineKeyboardButton(text="🔙 Bosh menyu / Главное / Main", callback_data="adm:main")]
         ])
 
-    def build_groups_view(conflicts_only=False, filter_mode="all", lang="uz"):
+    def build_group_detail_view(chat_id: int, lang: str = "uz"):
+        rows = db.rows("SELECT * FROM groups WHERE id=?", (chat_id,))
+        if not rows:
+            return "⚠️ Guruh topilmadi.", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📋 Guruhlar ro'yxati", callback_data="adm:groups")]])
+        g = rows[0]
+        title = g.get("title") or "Nomsiz"
+        unit = g.get("manual_unit") or g.get("unit")
+        is_act = (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))
+        st_str = "🟢 *Faol (Active)*" if is_act else "⏸ *Faol emas (Inactive)*"
+        avatar_str = "Mavjud" if g.get("photo") else "Yo'q"
+        unit_info = f"*{unit}*" + (" (qo'lda kiritilgan)" if g.get("manual_unit") else "") if unit else "⚠️ *Bog'lanmagan (Konflikt)*"
+
+        lines = [
+            "⚙️ *Guruh sozlamalari:*\n",
+            f"📌 *Nomi:* `{title}`",
+            f"🆔 *Chat ID:* `{g['id']}`",
+            f"🚛 *Unit:* {unit_info}",
+            f"📊 *Hozirgi holati:* {st_str}",
+            f"🖼 *Avatar:* {avatar_str}\n",
+            "👇 *Guruh statusini tanlang:*"
+        ]
+
+        kb = []
+        # Buttons to toggle status directly in bot
+        b_act_text = "🟢 Faol (Active) ✓" if is_act else "🟢 Faol qilish (Active)"
+        b_inact_text = "⏸ Faol emas (Inactive) ✓" if not is_act else "⏸ Faol emas qilish (Inactive)"
+        kb.append([
+            InlineKeyboardButton(text=b_act_text, callback_data=f"adm:grp_set_status:{g['id']}:active"),
+            InlineKeyboardButton(text=b_inact_text, callback_data=f"adm:grp_set_status:{g['id']}:inactive")
+        ])
+
+        # Unit update button
+        kb.append([
+            InlineKeyboardButton(text="✍️ Unit raqamini kiritish", callback_data=f"adm:grp_set_unit_prompt:{g['id']}")
+        ])
+
+        # Back to groups list
+        kb.append([
+            InlineKeyboardButton(text="🔙 Guruhlar ro'yxatiga qaytish", callback_data="adm:groups")
+        ])
+
+        return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=kb)
+
+    def build_groups_view(conflicts_only=False, filter_mode="all", page=0, lang="uz"):
         groups = db.groups()
         present_groups = [g for g in groups if g.get("present")]
         active_groups = [g for g in present_groups if (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))]
@@ -475,52 +518,69 @@ def create_app():
 
         if filter_mode == "conflicts" or conflicts_only:
             target_list = conflicts
-            lines.append("⚠️ *Faqat konfliktli guruhlar:*\n")
+            lines.append("⚠️ *Faqat konfliktli guruhlar (sozlash uchun bosing):*\n")
             if not conflicts:
                 lines.append("🎉 Barcha guruhlar muvaffaqiyatli bog'langan!")
         elif filter_mode == "active":
             target_list = active_groups
-            lines.append("🟢 *Faqat faol (Active) guruhlar:*\n")
+            lines.append("🟢 *Faqat faol (Active) guruhlar (sozlash uchun bosing):*\n")
             if not active_groups:
                 lines.append("Faol guruhlar mavjud emas.")
         elif filter_mode == "inactive":
             target_list = inactive_groups
-            lines.append("⏸ *Faqat faol emas (Inactive) guruhlar:*\n")
+            lines.append("⏸ *Faqat faol emas (Inactive) guruhlar (sozlash uchun bosing):*\n")
             if not inactive_groups:
                 lines.append("Faol emas guruhlar mavjud emas.")
         else:
             target_list = present_groups
-            lines.append("👥 *Barcha guruhlar ro'yxati:*\n")
+            lines.append("👥 *Guruhlar ro'yxati (holatini o'zgartirish uchun bosing):*\n")
             if not present_groups:
                 lines.append(t("groups_no_active", lang))
 
-        for g in target_list[:20]:
+        # Pagination: 8 groups per page
+        PAGE_SIZE = 8
+        total_pages = max(1, (len(target_list) + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = max(0, min(page, total_pages - 1))
+        start_idx = page * PAGE_SIZE
+        page_groups = target_list[start_idx:start_idx + PAGE_SIZE]
+
+        rows = []
+
+        # Clickable buttons for each group in current page!
+        for g in page_groups:
             title = g.get("title") or "Nomsiz"
             unit = g.get("manual_unit") or g.get("unit")
             is_act = (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))
             st_icon = "🟢" if is_act else "⏸"
-            if unit:
-                manual = " (manual)" if g.get("manual_unit") else ""
-                lines.append(f"• {st_icon} `{title}` → Unit *{unit}*{manual}")
-            else:
-                lines.append(f"• {st_icon} ⚠️ `{title}` → *KONFLIKT*")
+            unit_str = f" [U:{unit}]" if unit else " [⚠️]"
+            btn_title = title if len(title) <= 20 else title[:18] + "…"
+            btn_text = f"{st_icon} {btn_title}{unit_str}"
+            rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"adm:grp_detail:{g['id']}")])
 
-        if len(target_list) > 20:
-            lines.append(t("groups_more", lang, count=len(target_list) - 20))
+        # Pagination controls
+        if total_pages > 1:
+            nav_row = []
+            if page > 0:
+                nav_row.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"adm:groups_page:{filter_mode}:{page - 1}"))
+            nav_row.append(InlineKeyboardButton(text=f"📄 {page + 1}/{total_pages}", callback_data="adm:noop"))
+            if page < total_pages - 1:
+                nav_row.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"adm:groups_page:{filter_mode}:{page + 1}"))
+            rows.append(nav_row)
 
-        rows = []
+        # Filter mode buttons
+        rows.append([
+            InlineKeyboardButton(text=f"🟢 Faol ({len(active_groups)})" + (" ✓" if filter_mode == "active" else ""), callback_data="adm:groups:active"),
+            InlineKeyboardButton(text=f"⏸ Faol emas ({len(inactive_groups)})" + (" ✓" if filter_mode == "inactive" else ""), callback_data="adm:groups:inactive"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="📋 Barchasi" + (" ✓" if filter_mode == "all" else ""), callback_data="adm:groups:all"),
+            InlineKeyboardButton(text=f"⚠️ Konflikt ({len(conflicts)})" + (" ✓" if filter_mode == "conflicts" else ""), callback_data="adm:groups:conflicts"),
+        ])
+
         webapp_url = os.getenv("WEBAPP_URL", "")
         if webapp_url.startswith("https://"):
             rows.append([InlineKeyboardButton(text=t("btn_manage_miniapp", lang), web_app=WebAppInfo(url=webapp_url))])
 
-        rows.append([
-            InlineKeyboardButton(text=f"🟢 Faol ({len(active_groups)})", callback_data="adm:groups:active"),
-            InlineKeyboardButton(text=f"⏸ Faol emas ({len(inactive_groups)})", callback_data="adm:groups:inactive"),
-        ])
-        rows.append([
-            InlineKeyboardButton(text="📋 Barchasi", callback_data="adm:groups:all"),
-            InlineKeyboardButton(text=f"⚠️ Konflikt ({len(conflicts)})", callback_data="adm:groups:conflicts"),
-        ])
         rows.append([
             InlineKeyboardButton(text=t("btn_sync", lang), callback_data="adm:sync"),
             InlineKeyboardButton(text=t("btn_main", lang), callback_data="adm:main"),
@@ -1359,6 +1419,17 @@ def create_app():
         lang = db.get_lang(message.from_user.id) if message.from_user else "uz"
         st = adm_state.get(message.from_user.id, "")
 
+        if st.startswith("awaiting_group_unit:"):
+            chat_id = int(st.split(":")[1])
+            adm_state.pop(message.from_user.id, None)
+            val = (message.text or "").strip()
+            unit_val = None if val.lower() in ("clear", "auto", "-", "yo'q", "yoq", "none") else val
+            db.execute("UPDATE groups SET manual_unit=? WHERE id=?", (unit_val, chat_id))
+            await message.answer(f"✅ Guruh Unit qiymati saqlandi: *{unit_val or 'Avtomatik'}*", parse_mode="Markdown")
+            text, markup = build_group_detail_view(chat_id, lang)
+            await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+            return
+
         # A. Custom time entry
         if st.startswith("awaiting_custom_time:"):
             target_job_id = int(st.split(":")[1])
@@ -1484,6 +1555,53 @@ def create_app():
                             ]),
                             parse_mode="Markdown"
                         )
+                return
+
+            if data == "adm:noop":
+                await query.answer()
+                return
+
+            if data.startswith("adm:groups_page:"):
+                parts = data.split(":")
+                fmode = parts[2]
+                pg = int(parts[3])
+                await query.answer()
+                text, markup = build_groups_view(filter_mode=fmode, page=pg, lang=lang)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:grp_detail:"):
+                chat_id = int(data.split(":")[-1])
+                await query.answer()
+                text, markup = build_group_detail_view(chat_id, lang)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:grp_set_status:"):
+                parts = data.split(":")
+                chat_id = int(parts[2])
+                new_status = parts[3]
+                db.set_group_status(chat_id, new_status)
+                st_label = "🟢 Faol (Active)" if new_status == "active" else "⏸ Faol emas (Inactive)"
+                await query.answer(f"Holat: {st_label}", show_alert=True)
+                text, markup = build_group_detail_view(chat_id, lang)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data.startswith("adm:grp_set_unit_prompt:"):
+                chat_id = int(data.split(":")[-1])
+                await query.answer()
+                adm_state[query.from_user.id] = f"awaiting_group_unit:{chat_id}"
+                await query.message.answer(
+                    f"✍️ *Guruh `#{chat_id}` uchun Unit raqamini kiriting:*\n\n"
+                    "Misol: `42` yoki `105`\n"
+                    "_(Unitni bekor qilish / avtomatlashtirish uchun `clear` deb yozing)_",
+                    parse_mode="Markdown",
+                    reply_markup=ForceReply(selective=True)
+                )
                 return
 
             if data in ("adm:groups", "adm:groups:all"):
