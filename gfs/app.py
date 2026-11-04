@@ -126,6 +126,17 @@ def create_app():
                         text="Mini App", web_app=WebAppInfo(url=webapp_url)))
                 except Exception:
                     log.warning("Could not set Mini App menu for an admin")
+
+        # Auto-resolve missing usernames and names from Telegram
+        for admin in db.rows("SELECT a.id, a.name, u.username FROM admins a LEFT JOIN users u ON u.id=a.id WHERE u.username IS NULL OR u.username=''"):
+            try:
+                chat = await bot.get_chat(admin["id"])
+                if chat.username:
+                    db.execute("INSERT INTO users(id, username, lang) VALUES(?,?, 'uz') ON CONFLICT(id) DO UPDATE SET username=excluded.username", (admin["id"], chat.username.lower()))
+                if chat.full_name and not admin.get("name"):
+                    db.execute("UPDATE admins SET name=? WHERE id=?", (chat.full_name, admin["id"]))
+            except Exception:
+                pass
         tasks = [asyncio.create_task(dp.start_polling(bot, handle_signals=False)), asyncio.create_task(scheduler(bot, db))]
         try:
             yield
@@ -202,6 +213,16 @@ def create_app():
             raw = str(data.identifier).strip()
             if raw.isdigit() and int(raw) > 0:
                 target_id = int(raw)
+                if not db.rows("SELECT username FROM users WHERE id=? AND username!=''", (target_id,)):
+                    if bot:
+                        try:
+                            chat = await bot.get_chat(target_id)
+                            if chat.username:
+                                db.execute("INSERT INTO users(id, username, lang) VALUES(?,?, 'uz') ON CONFLICT(id) DO UPDATE SET username=excluded.username", (target_id, chat.username.lower()))
+                            if chat.full_name and not data.name:
+                                data.name = chat.full_name
+                        except Exception:
+                            pass
             else:
                 uname = raw.lstrip("@").lower()
                 users = db.rows("SELECT id FROM users WHERE lower(username)=?", (uname,))
@@ -213,7 +234,7 @@ def create_app():
                         try:
                             chat = await active_bot.get_chat(f"@{uname}")
                             target_id = chat.id
-                            db.execute("INSERT INTO users VALUES(?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username", (target_id, uname))
+                            db.execute("INSERT INTO users(id, username, lang) VALUES(?,?, 'uz') ON CONFLICT(id) DO UPDATE SET username=excluded.username", (target_id, uname))
                         except Exception:
                             pass
                 if not target_id:
@@ -273,21 +294,42 @@ def create_app():
 
     class Binding(BaseModel):
         unit: str | None = None
+        status: str | None = None
+
+    class GroupStatusUpdate(BaseModel):
+        status: str
+
+    @app.put("/api/groups/{chat_id}/status")
+    async def set_group_status_api(chat_id: int, data: GroupStatusUpdate, uid=Depends(auth)):
+        st = data.status.strip().lower()
+        if st not in ("active", "inactive"):
+            raise HTTPException(400, "Status faqat 'active' yoki 'inactive' bo'lishi mumkin")
+        cur = db.set_group_status(chat_id, st)
+        if not cur.rowcount:
+            raise HTTPException(404, "Guruh topilmadi")
+        return {"ok": True, "chat_id": chat_id, "status": st}
 
     @app.put("/api/groups/{chat_id}")
     async def bind(chat_id: int, binding: Binding, uid=Depends(auth)):
         if not db.rows("SELECT id FROM groups WHERE id=?", (chat_id,)):
             raise HTTPException(404, "Guruh topilmadi")
-        unit = normalize_unit(binding.unit) if binding.unit else None
-        if unit:
-            try:
-                trucks = await monday.trucks()
-            except Exception as exc:
-                raise HTTPException(502, str(exc))
-            if unit not in {t["unit"] for t in trucks}:
-                raise HTTPException(400, "Unit maqsadli Monday guruhlarida topilmadi")
-        db.execute("UPDATE groups SET manual_unit=? WHERE id=?", (unit, chat_id))
-        return {"ok": True}
+        if binding.status:
+            st = binding.status.strip().lower()
+            if st not in ("active", "inactive"):
+                raise HTTPException(400, "Status faqat 'active' yoki 'inactive' bo'lishi mumkin")
+            db.set_group_status(chat_id, st)
+        if binding.unit is not None:
+            unit = normalize_unit(binding.unit) if binding.unit else None
+            if unit:
+                try:
+                    trucks = await monday.trucks()
+                except Exception as exc:
+                    raise HTTPException(502, str(exc))
+                if unit not in {t["unit"] for t in trucks}:
+                    raise HTTPException(400, "Unit maqsadli Monday guruhlarida topilmadi")
+            db.execute("UPDATE groups SET manual_unit=? WHERE id=?", (unit, chat_id))
+        fresh = db.rows("SELECT status, manual_unit, unit FROM groups WHERE id=?", (chat_id,))[0]
+        return {"ok": True, "chat_id": chat_id, "status": fresh.get("status", "active"), "manual_unit": fresh["manual_unit"]}
 
     @app.post("/api/media")
     async def upload(kind: str, file: UploadFile = File(...), uid=Depends(auth)):
@@ -414,35 +456,51 @@ def create_app():
             [InlineKeyboardButton(text="🔙 Bosh menyu / Главное / Main", callback_data="adm:main")]
         ])
 
-    def build_groups_view(conflicts_only=False, lang="uz"):
+    def build_groups_view(conflicts_only=False, filter_mode="all", lang="uz"):
         groups = db.groups()
         present_groups = [g for g in groups if g.get("present")]
+        active_groups = [g for g in present_groups if (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))]
+        inactive_groups = [g for g in present_groups if g not in active_groups]
         conflicts = [g for g in present_groups if not (g.get("manual_unit") or g.get("unit"))]
         matched = len(present_groups) - len(conflicts)
 
         lines = [
             t("groups_title", lang) + "\n",
-            t("groups_stat", lang, total=len(groups), present=len(present_groups), matched=matched, conflicts=len(conflicts)) + "\n",
+            f"📊 *Jami:* {len(groups)} ta (🟢 Faol: {len(active_groups)} | ⏸ Faol emas: {len(inactive_groups)})\n"
+            f"🔗 *Bog'langan:* {matched} ta | ⚠️ *Konfliktlar:* {len(conflicts)} ta\n",
         ]
 
-        target_list = conflicts if conflicts_only else present_groups
-        if conflicts_only:
-            lines.append(t("groups_conflicts_head", lang) + "\n")
+        if filter_mode == "conflicts" or conflicts_only:
+            target_list = conflicts
+            lines.append("⚠️ *Faqat konfliktli guruhlar:*\n")
             if not conflicts:
-                lines.append(t("groups_no_conflicts", lang))
+                lines.append("🎉 Barcha guruhlar muvaffaqiyatli bog'langan!")
+        elif filter_mode == "active":
+            target_list = active_groups
+            lines.append("🟢 *Faqat faol (Active) guruhlar:*\n")
+            if not active_groups:
+                lines.append("Faol guruhlar mavjud emas.")
+        elif filter_mode == "inactive":
+            target_list = inactive_groups
+            lines.append("⏸ *Faqat faol emas (Inactive) guruhlar:*\n")
+            if not inactive_groups:
+                lines.append("Faol emas guruhlar mavjud emas.")
         else:
-            lines.append(t("groups_active_head", lang) + "\n")
+            target_list = present_groups
+            lines.append("👥 *Barcha guruhlar ro'yxati:*\n")
             if not present_groups:
                 lines.append(t("groups_no_active", lang))
 
         for g in target_list[:20]:
             title = g.get("title") or "Nomsiz"
             unit = g.get("manual_unit") or g.get("unit")
+            is_act = (g.get("status") == "active" if g.get("status") else eligible(g.get("title", ""), bool(g.get("photo"))))
+            st_icon = "🟢" if is_act else "⏸"
             if unit:
                 manual = " (manual)" if g.get("manual_unit") else ""
-                lines.append(f"• `{title}` → Unit *{unit}*{manual}")
+                lines.append(f"• {st_icon} `{title}` → Unit *{unit}*{manual}")
             else:
-                lines.append(f"• ⚠️ `{title}` → *KONFLIKT*")
+                lines.append(f"• {st_icon} ⚠️ `{title}` → *KONFLIKT*")
 
         if len(target_list) > 20:
             lines.append(t("groups_more", lang, count=len(target_list) - 20))
@@ -452,16 +510,18 @@ def create_app():
         if webapp_url.startswith("https://"):
             rows.append([InlineKeyboardButton(text=t("btn_manage_miniapp", lang), web_app=WebAppInfo(url=webapp_url))])
 
-        toggle_btn = (
-            InlineKeyboardButton(text=t("btn_all_groups", lang), callback_data="adm:groups")
-            if conflicts_only else
-            InlineKeyboardButton(text=t("btn_conflicts_only", lang), callback_data="adm:groups:conflicts")
-        )
         rows.append([
-            toggle_btn,
-            InlineKeyboardButton(text=t("btn_sync", lang), callback_data="adm:sync")
+            InlineKeyboardButton(text=f"🟢 Faol ({len(active_groups)})", callback_data="adm:groups:active"),
+            InlineKeyboardButton(text=f"⏸ Faol emas ({len(inactive_groups)})", callback_data="adm:groups:inactive"),
         ])
-        rows.append([InlineKeyboardButton(text=t("btn_main", lang), callback_data="adm:main")])
+        rows.append([
+            InlineKeyboardButton(text="📋 Barchasi", callback_data="adm:groups:all"),
+            InlineKeyboardButton(text=f"⚠️ Konflikt ({len(conflicts)})", callback_data="adm:groups:conflicts"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text=t("btn_sync", lang), callback_data="adm:sync"),
+            InlineKeyboardButton(text=t("btn_main", lang), callback_data="adm:main"),
+        ])
         return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
     def build_audits_view(lang="uz"):
@@ -746,6 +806,35 @@ def create_app():
         ])
         await message.answer(f"✅ Administrator `#{target_id}` ma'lumotlari yangilandi: *{new_name}*", parse_mode="Markdown", reply_markup=markup)
 
+    @dp.message(Command("set_group_status"))
+    async def set_group_status_cmd(message: Message):
+        if not await known_user(message):
+            return
+        parts = (message.text or "").split(maxsplit=2)
+        if len(parts) < 3:
+            await message.answer(
+                "ℹ️ *Guruh statusini o'zgartirish:*\n"
+                "`/set_group_status CHAT_ID active` yoki `inactive`\n"
+                "Misol: `/set_group_status -100123456789 active`",
+                parse_mode="Markdown"
+            )
+            return
+        chat_val, status_val = parts[1].strip(), parts[2].strip().lower()
+        if status_val not in ("active", "inactive"):
+            await message.answer("Status faqat `active` yoki `inactive` bo'lishi mumkin.")
+            return
+        try:
+            cid = int(chat_val)
+        except ValueError:
+            await message.answer("To'g'ri raqamli Chat ID kiriting.")
+            return
+        cur = db.set_group_status(cid, status_val)
+        if not cur.rowcount:
+            await message.answer("Guruh topilmadi.")
+            return
+        st_text = "🟢 Faol (Active)" if status_val == "active" else "⏸ Faol emas (Inactive)"
+        await message.answer(f"✅ Guruh `#{cid}` statusi o'zgartirildi: *{st_text}*", parse_mode="Markdown")
+
     @dp.message(Command("sync", "groups"))
     async def sync_command(message: Message):
         if not await known_user(message):
@@ -898,7 +987,7 @@ def create_app():
                     try:
                         chat = await active_bot.get_chat(f"@{uname}")
                         uid = chat.id
-                        db.execute("INSERT INTO users VALUES(?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username", (uid, uname))
+                        db.execute("INSERT INTO users(id, username, lang) VALUES(?,?, 'uz') ON CONFLICT(id) DO UPDATE SET username=excluded.username", (uid, uname))
                     except Exception:
                         await message.answer(f"❌ `@{uname}` foydalanuvchisi topilmadi.\nFoydalanuvchi avval botga /start yuborgan bo'lishi yoki to'g'ri Telegram ID kiriting.", parse_mode="Markdown")
                         return
@@ -1016,16 +1105,30 @@ def create_app():
                         )
                 return
 
-            if data == "adm:groups":
+            if data in ("adm:groups", "adm:groups:all"):
                 await query.answer()
-                text, markup = build_groups_view(conflicts_only=False, lang=lang)
+                text, markup = build_groups_view(filter_mode="all", lang=lang)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:groups:active":
+                await query.answer()
+                text, markup = build_groups_view(filter_mode="active", lang=lang)
+                with contextlib.suppress(Exception):
+                    await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            if data == "adm:groups:inactive":
+                await query.answer()
+                text, markup = build_groups_view(filter_mode="inactive", lang=lang)
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
                 return
 
             if data == "adm:groups:conflicts":
                 await query.answer()
-                text, markup = build_groups_view(conflicts_only=True, lang=lang)
+                text, markup = build_groups_view(filter_mode="conflicts", lang=lang)
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
                 return
@@ -1058,6 +1161,17 @@ def create_app():
 
             if data == "adm:admins":
                 await query.answer()
+                active_bot = bot or query.bot
+                if active_bot:
+                    for a in db.rows("SELECT a.id, a.name, u.username FROM admins a LEFT JOIN users u ON u.id=a.id WHERE u.username IS NULL OR u.username=''"):
+                        try:
+                            chat = await active_bot.get_chat(a["id"])
+                            if chat.username:
+                                db.execute("INSERT INTO users(id, username, lang) VALUES(?,?, 'uz') ON CONFLICT(id) DO UPDATE SET username=excluded.username", (a["id"], chat.username.lower()))
+                            if chat.full_name and not a.get("name"):
+                                db.execute("UPDATE admins SET name=? WHERE id=?", (chat.full_name, a["id"]))
+                        except Exception:
+                            pass
                 text, markup = build_admins_view(lang=lang)
                 with contextlib.suppress(Exception):
                     await query.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")

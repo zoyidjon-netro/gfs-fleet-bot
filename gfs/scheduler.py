@@ -66,7 +66,13 @@ async def execute_job(bot, db, job):
             # Fresh title/photo immediately before every actual send. Fail closed on API errors.
             chat = await bot.get_chat(group["id"])
             db.save_group(chat)
-            if not eligible(chat.title or "", bool(chat.photo)):
+            fresh_rows = db.rows("SELECT * FROM groups WHERE id=?", (group["id"],))
+            fresh = fresh_rows[0] if fresh_rows else group
+            group_active = (fresh.get("status") == "active") if fresh.get("status") else eligible(chat.title or "", bool(chat.photo))
+
+            # If recipient was specifically selected by user, send it!
+            # If broadcast had no selection (send to all), only deliver to active groups.
+            if selected is None and (not group_active or not eligible(chat.title or "", bool(chat.photo))):
                 state = "skipped"
             else:
                 db.execute("INSERT INTO deliveries(job,occurrence,chat,state) VALUES(?,?,?,'sending')",

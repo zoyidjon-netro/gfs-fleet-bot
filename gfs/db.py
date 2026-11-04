@@ -14,7 +14,8 @@ class Database:
         CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT, lang TEXT DEFAULT 'uz');
         CREATE TABLE IF NOT EXISTS groups(
           id INTEGER PRIMARY KEY, title TEXT NOT NULL, photo INTEGER NOT NULL,
-          present INTEGER NOT NULL DEFAULT 1, unit TEXT, manual_unit TEXT);
+          present INTEGER NOT NULL DEFAULT 1, unit TEXT, manual_unit TEXT,
+          status TEXT NOT NULL DEFAULT 'active');
         CREATE TABLE IF NOT EXISTS jobs(
           id INTEGER PRIMARY KEY AUTOINCREMENT, owner INTEGER NOT NULL,
           payload TEXT NOT NULL, due REAL NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
@@ -38,6 +39,10 @@ class Database:
         user_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(users)")}
         if "lang" not in user_cols:
             self.conn.execute("ALTER TABLE users ADD COLUMN lang TEXT DEFAULT 'uz'")
+        group_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(groups)")}
+        if "status" not in group_cols:
+            self.conn.execute("ALTER TABLE groups ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+            self.conn.execute("UPDATE groups SET status='inactive' WHERE (title LIKE '%INACTIVE%' OR title LIKE '%inactive%') AND photo=0")
         self.conn.execute("UPDATE admins SET role='admin' WHERE role='dispatcher'")
         self.conn.commit()
 
@@ -71,9 +76,16 @@ class Database:
         return self.rows("SELECT * FROM groups ORDER BY title")
 
     def save_group(self, chat, present=True):
-        self.execute('''INSERT INTO groups(id,title,photo,present) VALUES(?,?,?,?)
+        import re
+        is_inactive = bool(re.search(r"\bINACTIVE\b", chat.title or "", re.I)) and not bool(chat.photo)
+        default_status = "inactive" if is_inactive else "active"
+        self.execute('''INSERT INTO groups(id,title,photo,present,status) VALUES(?,?,?,?,?)
           ON CONFLICT(id) DO UPDATE SET title=excluded.title,photo=excluded.photo,present=excluded.present''',
-          (chat.id, chat.title or "", bool(chat.photo), present))
+          (chat.id, chat.title or "", bool(chat.photo), present, default_status))
+
+    def set_group_status(self, chat_id, status):
+        status = "inactive" if status == "inactive" else "active"
+        return self.execute("UPDATE groups SET status=? WHERE id=?", (status, chat_id))
 
     def remap(self, trucks):
         from .domain import resolve_unit

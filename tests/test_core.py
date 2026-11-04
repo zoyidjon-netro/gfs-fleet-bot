@@ -602,3 +602,156 @@ def test_multi_language_support(tmp_path, monkeypatch):
     assert any("Botni boshqarish uchun" in c.text for c in edit_calls)
 
     db.conn.close()
+
+
+def test_group_status_api_and_scheduler_delivery(tmp_path, monkeypatch):
+    import json
+    from gfs.app import create_app
+    from gfs.scheduler import execute_job
+    from fastapi.testclient import TestClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    db_file = tmp_path / "test_group_status.sqlite3"
+    monkeypatch.setenv("DB_PATH", str(db_file))
+    monkeypatch.setenv("ADMIN_IDS", "7")
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    app = create_app()
+    db = app.state.db
+
+    client = TestClient(app)
+    headers = {"Authorization": "tma " + signed_data(token="token", uid=7)}
+
+    # Insert two groups: one active, one inactive
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-101, 'Active Fleet Group', 1, 1, 'active')")
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-102, 'Old Inactive Group', 0, 1, 'inactive')")
+
+    # 1. Test PUT /api/groups/{chat_id}/status
+    res = client.put("/api/groups/-101/status", json={"status": "inactive"}, headers=headers)
+    assert res.status_code == 200
+    assert res.json()["status"] == "inactive"
+    row = db.rows("SELECT status FROM groups WHERE id=-101")[0]
+    assert row["status"] == "inactive"
+
+    # Switch back to active
+    res = client.put("/api/groups/-101/status", json={"status": "active"}, headers=headers)
+    assert res.status_code == 200
+    assert res.json()["status"] == "active"
+    row = db.rows("SELECT status FROM groups WHERE id=-101")[0]
+    assert row["status"] == "active"
+
+    # Invalid status
+    res = client.put("/api/groups/-101/status", json={"status": "unknown_status"}, headers=headers)
+    assert res.status_code == 400
+
+    # Nonexistent group
+    res = client.put("/api/groups/-999999/status", json={"status": "active"}, headers=headers)
+    assert res.status_code == 404
+
+    # 2. Test execute_job with default broadcast (recipients = None): sends only to active groups
+    cursor1 = db.execute("INSERT INTO jobs(owner, payload, due, state) VALUES(?, ?, ?, 'pending')",
+                         (7, json.dumps({"kind": "text", "text": "Default broadcast", "recipients": None}), 100))
+    job1_id = cursor1.lastrowid
+    job1 = db.rows("SELECT * FROM jobs WHERE id=?", (job1_id,))[0]
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock(return_value=MagicMock(message_id=901))
+    bot.get_chat = AsyncMock(return_value=MagicMock(id=-101, title="Active Fleet Group", photo=1))
+    asyncio.run(execute_job(bot, db, job1))
+
+    deliveries1 = db.rows("SELECT chat, state FROM deliveries WHERE job=?", (job1_id,))
+    deliv_map1 = {d["chat"]: d["state"] for d in deliveries1}
+    assert deliv_map1[-101] == "sent"      # Active group was delivered
+    assert deliv_map1[-102] == "skipped"   # Inactive group was skipped
+
+    # 3. Test execute_job with explicit selection (recipients = [-102]): delivers to inactive group!
+    cursor2 = db.execute("INSERT INTO jobs(owner, payload, due, state) VALUES(?, ?, ?, 'pending')",
+                         (7, json.dumps({"kind": "text", "text": "Targeted to inactive group", "recipients": [-102]}), 100))
+    job2_id = cursor2.lastrowid
+    job2 = db.rows("SELECT * FROM jobs WHERE id=?", (job2_id,))[0]
+
+    bot.reset_mock()
+    bot.send_message = AsyncMock(return_value=MagicMock(message_id=902))
+    bot.get_chat = AsyncMock(return_value=MagicMock(id=-102, title="Old Inactive Group", photo=0))
+    asyncio.run(execute_job(bot, db, job2))
+
+    deliveries2 = db.rows("SELECT chat, state FROM deliveries WHERE job=?", (job2_id,))
+    deliv_map2 = {d["chat"]: d["state"] for d in deliveries2}
+    assert deliv_map2[-102] == "sent"      # Inactive group WAS DELIVERED because admin selected it!
+    assert -101 not in deliv_map2          # Active group wasn't in recipients list
+
+    db.conn.close()
+
+
+def test_admin_inline_buttons_show_username_and_categories(tmp_path, monkeypatch):
+    from aiogram.types import Update, CallbackQuery, User, Message, Chat
+    from aiogram.methods import EditMessageText
+    from gfs.app import create_app
+
+    db_file = tmp_path / "test_admin_ui.sqlite3"
+    monkeypatch.setenv("DB_PATH", str(db_file))
+    monkeypatch.setenv("ADMIN_IDS", "7,1001")
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    app = create_app()
+    db = app.state.db
+    dp = app.state.dp
+
+    # Associate usernames in users table
+    db.execute("INSERT INTO users(id, username, lang) VALUES(7, 'boss_admin', 'uz') ON CONFLICT(id) DO UPDATE SET username='boss_admin'")
+    db.execute("INSERT INTO users(id, username, lang) VALUES(1001, 'fleet_admin', 'uz') ON CONFLICT(id) DO UPDATE SET username='fleet_admin'")
+
+    bot = AsyncMock()
+    msg_box = Message(message_id=300, date=datetime.now(), chat=Chat(id=7, type="private"))
+
+    # 1. Test clicking adm:admins produces buttons with @username
+    q_admins = CallbackQuery(
+        id="cb_adm_list",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_adm",
+        message=msg_box,
+        data="adm:admins"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=401, callback_query=q_admins)))
+
+    edit_calls = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert edit_calls, "No EditMessageText call found"
+    last_call = edit_calls[-1]
+    assert "@boss_admin" in last_call.text
+    assert "@fleet_admin" in last_call.text
+
+    all_btns = [btn.text for row in last_call.reply_markup.inline_keyboard for btn in row]
+    assert any("🗑 @boss_admin" in b for b in all_btns)
+    assert any("🗑 @fleet_admin" in b for b in all_btns)
+
+    # 2. Test clicking adm:groups:active and adm:groups:inactive
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-1, 'Active Group', 1, 1, 'active')")
+    db.execute("INSERT INTO groups(id, title, photo, present, status) VALUES(-2, 'Inactive Group', 0, 1, 'inactive')")
+
+    bot.reset_mock()
+    q_groups_act = CallbackQuery(
+        id="cb_g_act",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_g_act",
+        message=msg_box,
+        data="adm:groups:active"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=402, callback_query=q_groups_act)))
+
+    edit_calls2 = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert edit_calls2
+    assert "Faqat faol" in edit_calls2[-1].text
+
+    bot.reset_mock()
+    q_groups_inact = CallbackQuery(
+        id="cb_g_inact",
+        from_user=User(id=7, is_bot=False, first_name="Boss"),
+        chat_instance="c_g_inact",
+        message=msg_box,
+        data="adm:groups:inactive"
+    ).as_(bot)
+    asyncio.run(dp.feed_update(bot, Update(update_id=403, callback_query=q_groups_inact)))
+
+    edit_calls3 = [c.args[0] for c in bot.call_args_list if c.args and isinstance(c.args[0], EditMessageText)]
+    assert edit_calls3
+    assert "Faqat faol emas" in edit_calls3[-1].text
+
+    db.conn.close()

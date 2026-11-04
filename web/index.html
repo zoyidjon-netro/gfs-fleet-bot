@@ -64,7 +64,7 @@ html{background:var(--bg)}button{background:var(--button);color:var(--on-button)
 </div>
 <div class="compose-step">04 · Tekshirish va yuborish</div><p class="helper">ⓘ Yuborish paytida guruhlar tekshiriladi. Nomida INACTIVE bo‘lgan va avatari yo‘q guruhlarga yuborilmaydi.</p><div class="actions">
 <button type="button" id="preview" class="secondary">O‘zimga sinov yuborish</button><button type="submit">Tarqatmani saqlash</button><button type="button" id="reset" class="secondary">Tozalash</button></div></form></section>
-<section id="groups-section" hidden><div class="section-heading"><div><div class="section-number">02 / GURUHLAR</div><h2>Guruhlar va Unitlar</h2><p class="section-caption">Bog‘lanishlarni ko‘ring va tekshiring.</p></div><button id="sync" class="secondary">↻ Monday bilan solishtirish</button></div><div class="toolbar"><input id="groupSearch" type="search" placeholder="Guruh yoki Unit qidirish" aria-label="Guruh yoki Unit qidirish"><select id="groupFilter" aria-label="Guruh filtri"><option value="all">Barcha guruhlar</option><option value="mapped">Unit bog‘langan</option><option value="conflict">Konflikt</option><option value="eligible">Yuboriladi</option><option value="excluded">Chiqarilgan</option></select></div><datalist id="monday-units"></datalist><div id="groups" class="muted">Yuklanmoqda…</div></section>
+<section id="groups-section" hidden><div class="section-heading"><div><div class="section-number">02 / GURUHLAR</div><h2>Guruhlar va Unitlar</h2><p class="section-caption">Bog‘lanishlarni ko‘ring va tekshiring.</p></div><button id="sync" class="secondary">↻ Monday bilan solishtirish</button></div><div class="toolbar"><input id="groupSearch" type="search" placeholder="Guruh yoki Unit qidirish" aria-label="Guruh yoki Unit qidirish"><select id="groupFilter" aria-label="Guruh filtri"><option value="all">Barcha guruhlar</option><option value="active">🟢 Faol (Active)</option><option value="inactive">⏸ Faol emas (Inactive)</option><option value="mapped">Unit bog‘langan</option><option value="conflict">Konflikt</option></select></div><datalist id="monday-units"></datalist><div id="groups" class="muted">Yuklanmoqda…</div></section>
 <section id="jobs-section" hidden><div class="section-number">03 / JADVAL</div><h2>Tarqatmalar</h2><p class="section-caption">Rejalar va yuborish natijalari.</p><button type="button" data-go="compose-section">+ Yangi tarqatma</button><div class="toolbar"><input type="search" id="jobSearch" placeholder="Xabar qidirish" aria-label="Xabar qidirish"><select id="jobFilter" aria-label="Tarqatma holati"><option value="all">Barcha holatlar</option><option value="pending">Kutilmoqda</option><option value="recurring">Takroriy</option><option value="running">Yuborilmoqda</option><option value="done">Yakunlangan</option><option value="failed">Xato</option><option value="cancelled">Bekor qilingan</option></select></div><div id="jobs" class="muted">Yuklanmoqda…</div></section>
 <section id="audits" hidden><div class="section-number">COI AUDIT</div><h2>COI tekshiruvi</h2><div class="notice-page"><h2>Natijalar bot chatida</h2><p>COI PDF faylini botga yuboring yoki faylga javoban /check_coi buyrug‘ini yozing. Hozircha audit tarixi Mini App’ga ulanmagan.</p><button id="openBot" class="secondary">Botga qaytish</button></div></section><section id="more" hidden><div class="section-number">SOZLAMALAR</div><h2>Profil va yordam</h2><p class="section-caption" id="profile">Telegram profili</p><div class="item"><strong>Administratorlar</strong><p class="muted">Admin qo‘shish uchun bot chatida /add_admin buyrug‘idan foydalaning. Ro‘yxat hozircha Mini App’da mavjud emas.</p></div><div class="item"><strong>Ko‘rinish</strong><label for="theme">Mavzu</label><select id="theme"><option value="auto">Telegram mavzusi</option><option value="light">Yorug‘</option><option value="dark">Qorong‘i</option></select></div><div class="item"><strong>GFS Speaker</strong><p class="muted">Safety & Fleet · Telegram Mini App</p></div></section></main><nav class="bottom-nav" aria-label="Asosiy navigatsiya"><button data-screen="dashboard" class="active" aria-current="page">⌂<span>Dashboard</span></button><button data-screen="jobs-section">▤<span>Tarqatmalar</span></button><button data-screen="groups-section">◎<span>Guruhlar</span></button><button data-screen="audits">▧<span>Audit</span></button><button data-screen="more">⋯<span>Yana</span></button></nav><script>
 
@@ -357,8 +357,79 @@ $('compose').onsubmit=e=>{e.preventDefault();run(async()=>{if($('schedule').valu
 function reset(){editing=null;HTMLFormElement.prototype.reset.call($('compose'));$('buttonRows').replaceChildren();updatePreview();$('formTitle').textContent='Yangi tarqatma';scheduleFields()}$('reset').onclick=reset;
 function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n}
 async function load(){const s=await api('state');jobs=s.jobs;groups=s.groups;renderDashboard();renderGroups();renderJobs()}
+function isGroupActive(g){if(!g.present)return false;if(g.status==='active')return true;if(g.status==='inactive')return false;return eligible(g)}
 function eligible(g){return !!g.present && !(/\bINACTIVE\b/i.test(g.title)&&!g.photo)}
-function renderGroups(){const query=$('groupSearch').value.toLowerCase(),filter=$('groupFilter').value;const shown=groups.filter(g=>{const unit=g.manual_unit||g.unit;return (g.title.toLowerCase().includes(query)||String(unit||'').toLowerCase().includes(query))&&(filter==='all'||filter==='mapped'&&unit||filter==='conflict'&&!unit&&g.present||filter==='eligible'&&eligible(g)||filter==='excluded'&&!eligible(g))});$('groups').replaceChildren();for(const g of shown){const box=node('div',undefined,'item');const unit=g.manual_unit||g.unit;const head=node('div',undefined,'group-head'), avatar=node('div',(g.title||'?').trim().slice(0,1).toUpperCase(),'group-avatar');head.append(avatar,node('strong',g.title));box.append(head,node('div',`${g.id} · ${g.present?'Bot mavjud':'Bot chiqarilgan'} · ${g.photo?'Avatar bor':'Avatar yo‘q'}`),node('div',unit?'Unit: '+unit:'KONFLIKT: Unitni tanlang',unit?'':'conflict'),node('span',eligible(g)?'Yuboriladi':g.present?'INACTIVE · avatar yo‘q':'Bot guruhda emas','status-pill '+(eligible(g)?'':g.present?'warning':'muted-pill')));if(!unit){const numbers=g.title.match(/\d+/g)||[];box.append(node('small','Nomdagi raqamlar: '+(numbers.join(', ')||'topilmadi')))}const input=node('input');input.placeholder='Unit raqami (bo‘sh: avtomatik)';input.value=g.manual_unit||'';input.setAttribute('list','monday-units');input.setAttribute('aria-label',g.title+' uchun Unit');const b=node('button','Saqlash','secondary');b.onclick=()=>run(async()=>{await api('groups/'+g.id,'PUT',{unit:input.value||null});await load();notice('Unit saqlandi')});box.append(input,b);$('groups').append(box)}if(!shown.length)$('groups').textContent=groups.length?'Mos guruh topilmadi.':'Botni ishchi guruhlarga qo‘shing.';}
+function renderGroups(){
+    const query=$('groupSearch').value.toLowerCase(),filter=$('groupFilter').value;
+    const shown=groups.filter(g=>{
+        const unit=g.manual_unit||g.unit;
+        const isAct=isGroupActive(g);
+        const matches=(g.title.toLowerCase().includes(query)||String(unit||'').toLowerCase().includes(query));
+        if(!matches)return false;
+        if(filter==='all')return true;
+        if(filter==='active')return isAct;
+        if(filter==='inactive')return !isAct;
+        if(filter==='mapped')return !!unit;
+        if(filter==='conflict')return !unit&&g.present;
+        if(filter==='eligible')return isAct;
+        if(filter==='excluded')return !isAct;
+        return true;
+    });
+    $('groups').replaceChildren();
+    for(const g of shown){
+        const box=node('div',undefined,'item');
+        const unit=g.manual_unit||g.unit;
+        const isAct=isGroupActive(g);
+        const head=node('div',undefined,'group-head'), avatar=node('div',(g.title||'?').trim().slice(0,1).toUpperCase(),'group-avatar');
+        head.append(avatar,node('strong',g.title));
+        
+        const statusBadge=node('span',isAct?'🟢 Faol (Active)':'⏸ Faol emas (Inactive)','status-pill '+(isAct?'':'warning'));
+        statusBadge.style.marginLeft='auto';
+        head.append(statusBadge);
+
+        box.append(head,node('div',`${g.id} · ${g.present?'Bot mavjud':'Bot chiqarilgan'} · ${g.photo?'Avatar bor':'Avatar yo‘q'}`),node('div',unit?'Unit: '+unit:'KONFLIKT: Unitni tanlang',unit?'':'conflict'));
+        if(!unit){
+            const numbers=g.title.match(/\d+/g)||[];
+            box.append(node('small','Nomdagi raqamlar: '+(numbers.join(', ')||'topilmadi')));
+        }
+        
+        const actRow=node('div');
+        actRow.style.display='flex';
+        actRow.style.flexWrap='wrap';
+        actRow.style.gap='8px';
+        actRow.style.alignItems='center';
+        actRow.style.marginTop='8px';
+
+        const input=node('input');
+        input.placeholder='Unit raqami (bo‘sh: avtomatik)';
+        input.value=g.manual_unit||'';
+        input.setAttribute('list','monday-units');
+        input.setAttribute('aria-label',g.title+' uchun Unit');
+        input.style.flex='1';
+        input.style.minWidth='140px';
+
+        const bSave=node('button','Saqlash','secondary');
+        bSave.onclick=()=>run(async()=>{
+            await api('groups/'+g.id,'PUT',{unit:input.value||null});
+            await load();
+            notice('Unit saqlandi');
+        });
+
+        const bToggle=node('button',isAct?'⏸ Faol emas qilish':'🟢 Faol qilish','secondary');
+        bToggle.style.whiteSpace='nowrap';
+        bToggle.onclick=()=>run(async()=>{
+            const nextSt=isAct?'inactive':'active';
+            await api('groups/'+g.id+'/status','PUT',{status:nextSt});
+            await load();
+            notice(`Guruh statusi: ${nextSt==='active'?'🟢 Faol':'⏸ Faol emas'}`);
+        });
+
+        actRow.append(input,bSave,bToggle);
+        box.append(actRow);
+        $('groups').append(box);
+    }
+    if(!shown.length)$('groups').textContent=groups.length?'Mos guruh topilmadi.':'Botni ishchi guruhlarga qo‘shing.';
+}
 function renderJobs(){const query=$('jobSearch').value.toLowerCase(),filter=$('jobFilter').value;const shown=jobs.filter(j=>(j.payload.text||j.payload.kind).toLowerCase().includes(query)&&(filter==='all'||filter==='recurring'&&!!j.payload.weekly||filter===j.state));$('jobs').replaceChildren();for(const j of shown){const box=node('div',undefined,'item');const labels={pending:'Kutilmoqda',running:'Yuborilmoqda',done:'Yakunlangan',failed:'Xato',cancelled:'Bekor qilingan'};const head=node('div',undefined,'job-heading');head.append(node('strong','#'+j.id),node('span',j.payload.weekly&&j.state==='pending'?'Haftalik':labels[j.state]||j.state,'status-pill '+(['failed','cancelled'].includes(j.state)?'warning':'')));box.append(head,node('div',new Date(j.due*1000).toLocaleString(),'job-date'),node('div',(j.payload.text||j.payload.kind).slice(0,180)),node('div','Yuborilgan: '+j.deliveries.filter(d=>d.state==='sent').length+' · Xato: '+j.deliveries.filter(d=>d.state==='failed').length+(j.payload.kind!=='text'?' · Media biriktirilgan':'')));if(j.payload.weekly)box.append(node('small','Har hafta · '+j.payload.weekly.timezone));if(j.last_error)box.append(node('p',j.last_error));const detail=node('details'),summary=node('summary','Yuborish natijalari');detail.append(summary,node('pre',j.deliveries.map(d=>`${d.chat}: ${d.state}${d.error?' — '+d.error:''}`).join('\n')||'Hali yuborilmagan'));box.append(detail);if(j.state==='pending'){const b=node('button','Tahrirlash','secondary');b.onclick=()=>{showScreen('compose-section');edit(j)};box.append(b)}if(['pending','running'].includes(j.state)){const b=node('button','Bekor qilish','secondary');b.onclick=()=>run(async()=>{if(!confirm('Bu tarqatmani bekor qilasizmi?'))return;await api('jobs/'+j.id,'DELETE');await load();notice('Bekor qilindi')});box.append(b)}$('jobs').append(box)}if(!shown.length)$('jobs').textContent=jobs.length?'Mos tarqatma topilmadi.':'Tarqatmalar yo‘q.'}
 function edit(j){reset();editing=j.id;const p=j.payload;for(const k of ['kind','text','file_id','parse_mode','source_chat','source_message'])$(k).value=p[k]||'';(p.buttons||[]).forEach((row,i)=>row.forEach(button=>buttonRow(button,'existing-'+i)));if(p.weekly){$('schedule').value='weekly';$('weekday').value=p.weekly.weekday;$('weekly_time').value=[p.weekly.hour,p.weekly.minute].map(x=>String(x).padStart(2,'0')).join(':');$('timezone').value=p.weekly.timezone}else{$('schedule').value='once';const d=new Date(j.due*1000);$('due').value=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)}$('formTitle').textContent='Tarqatmani tahrirlash #'+j.id;scheduleFields();window.scrollTo({top:0,behavior:'smooth'})}
 function showScreen(id){for(const el of document.querySelectorAll('main > section'))el.hidden=el.id!==id;document.getElementById('hero').hidden=id!=='dashboard';document.querySelectorAll('[data-screen]').forEach(b=>{const active=b.dataset.screen===id||(id==='compose-section'&&b.dataset.screen==='jobs-section');b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});window.scrollTo(0,0);if(tg?.BackButton){if(id==='dashboard')tg.BackButton.hide();else tg.BackButton.show()}}
@@ -441,14 +512,21 @@ payload=function(){
 };
 
 const baseRecipientRender=renderRecipients;
+let recipientFilterTab = 'all';
+
 renderRecipients=function(){
     recipients.replaceChildren();
-    const eligibleCount=groups.filter(eligible).length;
+    const presentGroups = groups.filter(g=>g.present);
+    const activeGroups = presentGroups.filter(isGroupActive);
+    const inactiveGroups = presentGroups.filter(g=>!isGroupActive(g));
+    const activeCount = activeGroups.length;
+    const inactiveCount = inactiveGroups.length;
+    const totalCount = presentGroups.length;
     
-    // Mode toggles: Barcha guruhlar vs Tanlangan guruhlar
+    // Asosiy rejim tugmalari
     const modeRow=node('div',undefined,'row');
     modeRow.style.marginBottom='16px';
-    const btnAll=node('button',`📢 Barcha mos guruhlar (${eligibleCount} ta)`,recipientMode==='all'?'':'secondary');
+    const btnAll=node('button',`📢 Barcha faol guruhlar (${activeCount} ta)`,recipientMode==='all'?'':'secondary');
     btnAll.type='button';
     btnAll.onclick=()=>{
         recipientMode='all';
@@ -462,7 +540,7 @@ renderRecipients=function(){
     btnCustom.onclick=()=>{
         recipientMode='custom';
         if(selectedRecipients===null){
-            selectedRecipients=new Set(groups.filter(eligible).map(g=>g.id));
+            selectedRecipients=new Set(activeGroups.map(g=>g.id));
         }
         renderRecipients();
         renderReview();
@@ -472,78 +550,159 @@ renderRecipients=function(){
 
     if(recipientMode==='all'){
         const banner=node('div',undefined,'helper');
-        banner.innerHTML=`<strong>📢 Barcha guruhlarga yuborish rejimi tanlandi.</strong><br>Xabar avtomatik ravishda barcha faol va yuborishga mos guruhlarga (${eligibleCount} ta) tarqatiladi.`;
+        banner.innerHTML=`<strong>📢 Barcha faol guruhlarga yuborish rejimi.</strong><br>Xabar avtomatik ravishda barcha faol guruhlarga (${activeCount} ta) tarqatiladi. Faol emas deb belgilangan guruhlar (${inactiveCount} ta) chetlab o‘tiladi.`;
         recipients.append(banner);
 
         const listDiv=node('div');
-        for(const g of groups.filter(g=>g.present)){
+        for(const g of presentGroups){
+            const isAct = isGroupActive(g);
             const item=node('div',undefined,'item');
             item.style.display='flex';
             item.style.alignItems='center';
             item.style.gap='10px';
-            const icon=node('span',eligible(g)?'✓':'✗');
-            icon.style.fontWeight='bold';
-            icon.style.color=eligible(g)?'#16a34a':'#dc2626';
+            const icon=node('span',isAct?'🟢':'⏸');
             const unitText=g.manual_unit||g.unit?` · Unit ${g.manual_unit||g.unit}`:'';
             const textSpan=node('span',g.title+unitText);
-            const statusSpan=node('span',eligible(g)?'Yuboriladi':'Chiqarilgan','status-pill '+(eligible(g)?'':'warning'));
+            const statusSpan=node('span',isAct?'Yuboriladi':'Faol emas','status-pill '+(isAct?'':'warning'));
             statusSpan.style.marginLeft='auto';
             item.append(icon,textSpan,statusSpan);
             listDiv.append(item);
         }
         recipients.append(listDiv);
     } else {
+        // Tanlab jo'natish rejimi
+        const batchBox=node('div');
+        batchBox.style.padding='10px';
+        batchBox.style.marginBottom='12px';
+        batchBox.style.borderRadius='8px';
+        batchBox.style.background='var(--card-bg, #1a2332)';
+        batchBox.style.border='1px solid var(--border-color, #2d3748)';
+
+        const batchTitle=node('div', '⚡ Bir bosishda tanlash:', 'muted');
+        batchTitle.style.marginBottom='8px';
+        batchTitle.style.fontSize='13px';
+        batchTitle.style.fontWeight='600';
+
+        const batchRow=node('div',undefined,'row');
+        batchRow.style.display='flex';
+        batchRow.style.flexWrap='wrap';
+        batchRow.style.gap='8px';
+
+        const btnSelActive=node('button',`🟢 Barcha faol (${activeCount} ta)`,'secondary');
+        btnSelActive.type='button';
+        btnSelActive.onclick=()=>{
+            if(!selectedRecipients)selectedRecipients=new Set();
+            activeGroups.forEach(g=>selectedRecipients.add(g.id));
+            drawCustom();
+            renderReview();
+            notice(`Barcha faol guruhlar (${activeCount} ta) tanlandi`);
+        };
+
+        const btnSelInactive=node('button',`⏸ Barcha faol emas (${inactiveCount} ta)`,'secondary');
+        btnSelInactive.type='button';
+        btnSelInactive.onclick=()=>{
+            if(!selectedRecipients)selectedRecipients=new Set();
+            inactiveGroups.forEach(g=>selectedRecipients.add(g.id));
+            drawCustom();
+            renderReview();
+            notice(`Barcha faol emas guruhlar (${inactiveCount} ta) tanlandi`);
+        };
+
+        const btnSelAll=node('button',`✨ Hammasini tanlash (${totalCount} ta)`,'secondary');
+        btnSelAll.type='button';
+        btnSelAll.onclick=()=>{
+            selectedRecipients=new Set(presentGroups.map(g=>g.id));
+            drawCustom();
+            renderReview();
+            notice(`Barcha guruhlar (${totalCount} ta) tanlandi`);
+        };
+
+        const btnClear=node('button','🗑 Tozalash','secondary');
+        btnClear.type='button';
+        btnClear.onclick=()=>{
+            if(selectedRecipients)selectedRecipients.clear();
+            drawCustom();
+            renderReview();
+            notice('Tanlov tozalandi');
+        };
+
+        batchRow.append(btnSelActive,btnSelInactive,btnSelAll,btnClear);
+        batchBox.append(batchTitle,batchRow);
+
+        // Filtr va qidiruv paneli
         const toolbar=node('div',undefined,'toolbar');
+        toolbar.style.display='flex';
+        toolbar.style.gap='8px';
+        toolbar.style.alignItems='center';
+
         const search=node('input');
         search.type='search';
         search.placeholder='Guruh nomi yoki Unit qidirish…';
+        search.style.flex='1';
 
-        const btnSelAll=node('button','Barchasini tanlash','secondary');
-        btnSelAll.type='button';
-        btnSelAll.onclick=()=>{
-            selectedRecipients=new Set(groups.filter(eligible).map(g=>g.id));
+        const tabSelect=node('select');
+        tabSelect.innerHTML=`
+            <option value="all">📋 Barchasi (${totalCount})</option>
+            <option value="active">🟢 Faol (${activeCount})</option>
+            <option value="inactive">⏸ Faol emas (${inactiveCount})</option>
+            <option value="selected">✓ Faqat tanlanganlar</option>
+        `;
+        tabSelect.value=recipientFilterTab;
+        tabSelect.onchange=()=>{
+            recipientFilterTab=tabSelect.value;
             drawCustom();
-            renderReview();
         };
 
-        const btnClear=node('button','Tozalash','secondary');
-        btnClear.type='button';
-        btnClear.onclick=()=>{
-            selectedRecipients.clear();
-            drawCustom();
-            renderReview();
-        };
-        toolbar.append(search,btnSelAll,btnClear);
+        toolbar.append(search,tabSelect);
 
-        const counter=node('p',undefined,'muted');
+        const counter=node('div',undefined,'helper');
+        counter.style.margin='10px 0';
+
         const listDiv=node('div');
 
         function drawCustom(){
             const q=search.value.toLowerCase();
             const chosen=selectedRecipients||new Set();
-            counter.textContent=`Tanlangan: ${chosen.size} / ${eligibleCount} ta faol guruh`;
+            const tab=recipientFilterTab;
+
+            const selActCount = activeGroups.filter(g=>chosen.has(g.id)).length;
+            const selInactCount = inactiveGroups.filter(g=>chosen.has(g.id)).length;
+
+            counter.innerHTML=`📊 <strong>Tanlangan:</strong> 🟢 <b>${selActCount}</b> ta faol, ⏸ <b>${selInactCount}</b> ta faol emas (Jami: <b>${chosen.size}</b> / ${totalCount} ta)`;
+
             listDiv.replaceChildren();
 
-            const filtered=groups.filter(g=>g.present&&(g.title.toLowerCase().includes(q)||String(g.manual_unit||g.unit||'').includes(q)));
+            const filtered=presentGroups.filter(g=>{
+                const isAct=isGroupActive(g);
+                const matches=(g.title.toLowerCase().includes(q)||String(g.manual_unit||g.unit||'').includes(q));
+                if(!matches)return false;
+                if(tab==='active')return isAct;
+                if(tab==='inactive')return !isAct;
+                if(tab==='selected')return chosen.has(g.id);
+                return true;
+            });
+
             if(!filtered.length){
                 listDiv.append(node('p','Mos guruh topilmadi','empty'));
                 return;
             }
 
             for(const g of filtered){
+                const isAct=isGroupActive(g);
+                const isChecked=chosen.has(g.id);
+
                 const label=node('label',undefined,'item');
                 label.style.display='flex';
                 label.style.alignItems='center';
                 label.style.gap='12px';
-                label.style.cursor=eligible(g)?'pointer':'default';
+                label.style.cursor='pointer';
 
                 const check=node('input');
                 check.type='checkbox';
                 check.style.width='20px';
                 check.style.height='20px';
                 check.style.flexShrink='0';
-                check.checked=chosen.has(g.id);
-                check.disabled=!eligible(g);
+                check.checked=isChecked;
                 check.onchange=e=>{
                     e.stopPropagation();
                     if(check.checked)chosen.add(g.id);
@@ -558,11 +717,20 @@ renderRecipients=function(){
                 bodyDiv.style.flex='1';
                 bodyDiv.innerHTML=`<strong>${g.title}</strong><div style="font-size:12px;color:var(--muted);">${unitStr}</div>`;
 
-                const pill=node('span',eligible(g)?(check.checked?'Tanlangan':'Tanlanmagan'):'Chiqarilgan','status-pill '+(eligible(g)?(check.checked?'':'muted-pill'):'warning'));
-                label.append(check,bodyDiv,pill);
+                const stPill=node('span',isAct?'🟢 Faol':'⏸ Faol emas','status-pill '+(isAct?'':'warning'));
+                stPill.style.marginRight='6px';
+
+                const selPill=node('span',isChecked?'Tanlangan':'Tanlanmagan','status-pill '+(isChecked?'':'muted-pill'));
+
+                const pillsDiv=node('div');
+                pillsDiv.style.display='flex';
+                pillsDiv.style.gap='6px';
+                pillsDiv.append(stPill,selPill);
+
+                label.append(check,bodyDiv,pillsDiv);
 
                 label.onclick=e=>{
-                    if(e.target!==check&&eligible(g)){
+                    if(e.target!==check){
                         check.checked=!check.checked;
                         if(check.checked)chosen.add(g.id);
                         else chosen.delete(g.id);
@@ -575,7 +743,7 @@ renderRecipients=function(){
         }
         search.oninput=drawCustom;
         drawCustom();
-        recipients.append(toolbar,counter,listDiv);
+        recipients.append(batchBox,toolbar,counter,listDiv);
     }
 };
 
@@ -585,9 +753,13 @@ renderReview=function(){
     const paragraph=review.querySelector('p.muted');
     if(paragraph){
         if(recipientMode==='all'||selectedRecipients===null){
-            paragraph.textContent=`📢 Qabul qiluvchilar: Barcha mos guruhlar (${groups.filter(eligible).length} ta).`;
+            const actCount = groups.filter(g=>g.present&&isGroupActive(g)).length;
+            paragraph.textContent=`📢 Qabul qiluvchilar: Barcha faol guruhlar (${actCount} ta).`;
         } else {
-            paragraph.textContent=`👥 Qabul qiluvchilar: ${selectedRecipients.size} ta tanlangan guruh.`;
+            const chosen = selectedRecipients||new Set();
+            const act = groups.filter(g=>g.present&&isGroupActive(g)&&chosen.has(g.id)).length;
+            const inact = groups.filter(g=>g.present&&!isGroupActive(g)&&chosen.has(g.id)).length;
+            paragraph.textContent=`👥 Qabul qiluvchilar: ${chosen.size} ta tanlangan guruh (🟢 ${act} faol, ⏸ ${inact} faol emas).`;
         }
     }
 };
